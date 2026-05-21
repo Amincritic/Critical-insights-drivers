@@ -1,15 +1,11 @@
 # OpenICE Headless JSON Gateway — Philips + Draeger
 
-This package is a headless, no-GUI OpenICE-based gateway for:
-
 - Philips IntelliVue over LAN/UDP
 - Philips IntelliVue over MIB/RS232
 - Draeger MEDIBUS over serial or TCP
 - Philips + Draeger in one combined bedside process
 
 It reuses the OpenICE protocol parsers and publishes normalized JSON to stdout, JSONL files, and/or HTTP POST endpoints.
-
-> This is still gateway/integration software, not a certified medical device application. Validate against real devices and your hospital/network requirements before use.
 
 ---
 
@@ -54,24 +50,7 @@ sudo journalctl -u openice-multidevice -f
 
 See sections below for detailed options and configuration.
 
----
 
-## What was fixed in this version
-
-- Added Gradle `application` packaging for runnable modules, so `installDist` now produces runnable scripts.
-- Removed the invalid `https://mvnrepository.com` repository entry from the root Gradle build.
-- Added an SLF4J runtime backend using `slf4j-simple` so logs are visible without extra setup.
-- Fixed Philips LAN/UDP reconnect logic by recreating `NetworkLoop`, channel, and adapter on every reconnect attempt.
-- Fixed Philips MIB/RS232 reconnect logic by recreating the serial bridge, UDP loopback pair, `NetworkLoop`, channel, and adapter on every reconnect attempt.
-- Added bounded publish retry/backoff in the queued JSON publisher.
-- Added optional JSONL dead-letter output for events that still fail after all publish attempts.
-- Fixed publisher shutdown so it stops accepting new events, drains queued events, and only then closes downstream sinks.
-- Added HTTP custom headers through repeated `--http-header 'Name: value'` options.
-- Fixed `SerialProviderFactory` logging precedence bug.
-- Added Draeger `unit` / `unitCode` fields where a safe heuristic can infer units.
-- Updated README commands to match the patched Gradle/application layout.
-
----
 
 ## Device prerequisites
 
