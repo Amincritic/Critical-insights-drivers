@@ -152,13 +152,53 @@ Pin 2 (RxD) ─────────────── RS232 TX ── TTL RX
 
 ### Serial Settings
 
+Per the MEDIBUS protocol specification, the Evita Channel A uses:
+
 | Parameter | Value |
 |-----------|-------|
 | Baud rate | 19,200 bps (default, configurable with `--draeger-baud`) |
 | Data bits | 8 |
-| Parity | None |
+| Parity | **Even** (default, configurable with `--serial-parity` / `--draeger-parity`) |
 | Stop bits | 1 |
-| Flow control | None (XON/XOFF used at protocol level) |
+| Flow control | None (XON/XOFF DC1/DC3 handled at protocol level) |
+
+The driver defaults to **8E1** (even parity) to match the Evita Channel A spec.
+
+For devices that use Channel B or different settings (e.g. Fabius GS supports none/odd/even), override with:
+
+```bash
+# Evita Channel A (default)
+--draeger-baud 19200                          # 8E1 (even parity is default)
+
+# Fabius GS or Channel B with no parity
+--draeger-baud 19200 --serial-parity none     # 8N1
+
+# Fabius GS at 38400 baud
+--draeger-baud 38400 --serial-parity none     # 8N1
+```
+
+### Supported Draeger Models
+
+| Model | ID | Connector | Default Baud | Parity | Notes |
+|-------|-----|-----------|-------------|--------|-------|
+| Evita | 8210 | DB-9 female | 19200 | Even | Requires EvitaLink extension board |
+| Evita 2 | 8200 | DB-9 female | 19200 | Even | Requires EvitaLink extension board |
+| Evita 4 | — | DB-9 female | 19200 | Even | — |
+| Evita V500 | — | DB-9 | 19200 | Even | — |
+| Savina | — | DB-9 | 19200 | Even | — |
+| Fabius GS | 8088 | DB-9 male | 19200 | Configurable | Supports 1200-38400, none/odd/even |
+| Fabius Tiro | — | DB-9 male | 19200 | Configurable | Same as Fabius GS |
+
+### MEDIBUS Protocol Requirements
+
+Per the Dräger RS 232 MEDIBUS Protocol Definition (Rev 6.00):
+
+- **ICC handshake**: The driver sends an Initialize Communication Command (ICC, 0x51) before polling. This is required to establish the MEDIBUS link.
+- **3-second timeout**: Any pause >3 seconds terminates the link. The driver polls every 1 second (configurable with `--poll-ms`), keeping the link alive.
+- **NOP keep-alive**: If no commands/responses are needed, NOP (0x30) must be sent every 2 seconds. The driver's 1-second poll cycle covers this.
+- **10-second response timeout**: After sending a command, the device must respond within 10 seconds.
+- **DC1/DC3 flow control**: XON (0x11) suspends transmission, XOFF (0x13) resumes. The driver handles these at the protocol level.
+- **Galvanic isolation**: The MEDIBUS RS-232 port provides 1.5 kV (Evita) or 500 V (Fabius GS) galvanic isolation.
 
 ### Ventilator Configuration
 
@@ -166,7 +206,9 @@ On the Draeger ventilator:
 
 1. Enable the **MEDIBUS** protocol (consult Draeger service manual for your model)
 2. Confirm baud rate is set to **19200** (or match with `--draeger-baud`)
-3. Verify the RS-232 port is active and not in use by another device
+3. Confirm parity matches the driver setting (default: **even**)
+4. For Evita: ensure the **EvitaLink** extension board is installed and configured for Channel A
+5. Verify the RS-232 port is active and not in use by another device
 
 ---
 

@@ -231,9 +231,9 @@ public final class HeadlessMultiDeviceGatewayApp {
                     Thread poller = null;
                     try {
                         SerialProvider sp = SerialProviderFactory.getDefaultProvider();
-                        sp.setDefaultSerialSettings(a.draegerBaud, DataBits.Eight, Parity.None, StopBits.One, FlowControl.None);
+                        sp.setDefaultSerialSettings(a.draegerBaud, DataBits.Eight, a.draegerParity, StopBits.One, FlowControl.None);
                         serialSocket = sp.connect(a.draegerSerial, a.connectTimeoutMs);
-                        serialSocket.setSerialParams(a.draegerBaud, DataBits.Eight, Parity.None, StopBits.One, FlowControl.None);
+                        serialSocket.setSerialParams(a.draegerBaud, DataBits.Eight, a.draegerParity, StopBits.One, FlowControl.None);
                         in = serialSocket.getInputStream();
                         out = serialSocket.getOutputStream();
                         final HeadlessDraegerMedibus medibus = new HeadlessDraegerMedibus(in, out, a.gatewayId, a.bedId, a.draegerDeviceId, queue);
@@ -267,6 +267,14 @@ public final class HeadlessMultiDeviceGatewayApp {
     private static Thread startDraegerPoller(final HeadlessDraegerMedibus medibus, final long pollMs) {
         Thread poller = new Thread(new Runnable() {
             @Override public void run() {
+                // Per MEDIBUS protocol spec: send ICC to initialize communication
+                try {
+                    medibus.sendCommand(Command.InitializeComm);
+                    System.err.println("Draeger: ICC sent, communication initialized");
+                } catch (Exception e) {
+                    System.err.println("Draeger: ICC failed: " + e.getMessage());
+                }
+
                 while (!Thread.currentThread().isInterrupted()) {
                     try {
                         medibus.sendCommand(Command.ReqDeviceId);
@@ -322,6 +330,7 @@ public final class HeadlessMultiDeviceGatewayApp {
         String draegerDeviceId = "draeger_vent_01";
         long draegerPollMs = 1000L;
         int draegerBaud = 19200;
+        Parity draegerParity = Parity.Even;
 
         static Args parse(String[] args) {
             Args a = new Args();
@@ -352,6 +361,7 @@ public final class HeadlessMultiDeviceGatewayApp {
                 else if ("--draeger-device-id".equals(k)) { a.draegerDeviceId = required(k, v); i++; }
                 else if ("--draeger-poll-ms".equals(k)) { a.draegerPollMs = Long.parseLong(required(k, v)); i++; }
                 else if ("--draeger-baud".equals(k)) { a.draegerBaud = Integer.parseInt(required(k, v)); i++; }
+                else if ("--draeger-parity".equals(k)) { a.draegerParity = parseParity(required(k, v)); i++; }
                 else if ("--help".equals(k)) { usageAndExit(); }
                 else { throw new IllegalArgumentException("Unknown argument: " + k); }
             }
@@ -376,6 +386,12 @@ public final class HeadlessMultiDeviceGatewayApp {
             if (drainMs <= 0) { throw new IllegalArgumentException("--shutdown-drain-timeout-ms must be > 0"); }
         }
 
+        static Parity parseParity(String v) {
+            if ("even".equalsIgnoreCase(v)) return Parity.Even;
+            if ("odd".equalsIgnoreCase(v)) return Parity.Odd;
+            if ("none".equalsIgnoreCase(v)) return Parity.None;
+            throw new IllegalArgumentException("Parity must be even, odd, or none (default: even)");
+        }
         static String required(String k, String v) {
             if (v == null || v.startsWith("--")) { throw new IllegalArgumentException("Missing value for " + k); }
             return v;

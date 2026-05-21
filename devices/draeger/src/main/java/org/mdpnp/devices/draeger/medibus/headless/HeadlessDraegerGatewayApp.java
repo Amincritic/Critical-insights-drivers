@@ -78,6 +78,14 @@ public final class HeadlessDraegerGatewayApp {
     private static Thread startPoller(final HeadlessDraegerMedibus medibus, final long pollMs) {
         Thread poller = new Thread(new Runnable() {
             @Override public void run() {
+                // Per MEDIBUS protocol spec: send ICC to initialize communication
+                try {
+                    medibus.sendCommand(Command.InitializeComm);
+                    System.err.println("Draeger: ICC sent, communication initialized");
+                } catch (Exception e) {
+                    System.err.println("Draeger: ICC failed: " + e.getMessage());
+                }
+
                 while (!Thread.currentThread().isInterrupted()) {
                     try {
                         medibus.sendCommand(Command.ReqDeviceId);
@@ -114,10 +122,11 @@ public final class HeadlessDraegerGatewayApp {
         }
         if (a.serial != null) {
             SerialProvider sp = SerialProviderFactory.getDefaultProvider();
-            sp.setDefaultSerialSettings(a.serialBaud, DataBits.Eight, Parity.None, StopBits.One, FlowControl.None);
+            sp.setDefaultSerialSettings(a.serialBaud, DataBits.Eight, a.serialParity, StopBits.One, FlowControl.None);
             SerialSocket ss = sp.connect(a.serial, a.connectTimeoutMs);
-            ss.setSerialParams(a.serialBaud, DataBits.Eight, Parity.None, StopBits.One, FlowControl.None);
-            System.err.println("Draeger serial settings: " + a.serialBaud + " baud, 8N1, no flow control");
+            ss.setSerialParams(a.serialBaud, DataBits.Eight, a.serialParity, StopBits.One, FlowControl.None);
+            String parityStr = a.serialParity == Parity.Even ? "8E1" : a.serialParity == Parity.Odd ? "8O1" : "8N1";
+            System.err.println("Draeger serial settings: " + a.serialBaud + " baud, " + parityStr + ", no flow control");
             return new Transport(ss.getInputStream(), ss.getOutputStream(), null, ss);
         }
         throw new IllegalArgumentException("Either --serial or --tcp-host/--tcp-port is required");
@@ -169,6 +178,7 @@ public final class HeadlessDraegerGatewayApp {
         long reconnectMs = 5000L;
         long connectTimeoutMs = 10000L;
         int serialBaud = 19200;
+        Parity serialParity = Parity.Even;
 
         static Args parse(String[] args) {
             Args a = new Args();
@@ -176,6 +186,7 @@ public final class HeadlessDraegerGatewayApp {
                 String k=args[i]; String v=(i+1)<args.length?args[i+1]:null;
                 if ("--serial".equals(k)) { a.serial = required(k,v); i++; }
                 else if ("--serial-baud".equals(k)) { a.serialBaud = Integer.parseInt(required(k,v)); i++; }
+                else if ("--serial-parity".equals(k)) { a.serialParity = parseParity(required(k,v)); i++; }
                 else if ("--tcp-host".equals(k)) { a.tcpHost = required(k,v); i++; }
                 else if ("--tcp-port".equals(k)) { a.tcpPort = Integer.parseInt(required(k,v)); i++; }
                 else if ("--gateway-id".equals(k)) { a.gatewayId = required(k,v); i++; }
@@ -215,6 +226,12 @@ public final class HeadlessDraegerGatewayApp {
             if (publishAttempts <= 0) { throw new IllegalArgumentException("--publish-attempts must be > 0"); }
             if (retryBackoffMs < 0 || reconnectMs < 0) { throw new IllegalArgumentException("retry/reconnect timeouts must be >= 0"); }
             if (drainMs <= 0) { throw new IllegalArgumentException("--shutdown-drain-timeout-ms must be > 0"); }
+        }
+        static Parity parseParity(String v) {
+            if ("even".equalsIgnoreCase(v)) return Parity.Even;
+            if ("odd".equalsIgnoreCase(v)) return Parity.Odd;
+            if ("none".equalsIgnoreCase(v)) return Parity.None;
+            throw new IllegalArgumentException("--serial-parity must be even, odd, or none (default: even)");
         }
         static String required(String k, String v) {
             if (v == null || v.startsWith("--")) { throw new IllegalArgumentException("Missing value for " + k); }
