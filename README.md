@@ -397,48 +397,95 @@ Multidevice Draeger options:
 
 ---
 
-## Example systemd services
+## Production deployment
+
+### Automated deployment
+
+The simplest way to deploy is with the included script:
+
+```bash
+sudo bash deploy/deploy.sh
+```
+
+This script:
+
+1. Checks for JDK 17
+2. Creates the `openice` service user with `dialout` group access
+3. Creates `/var/log/openice/` with restricted permissions
+4. Downloads Gradle 7.6 if needed and builds the project
+5. Installs to `/opt/openice-headless/`
+6. Installs logrotate and systemd configs
+
+After deployment, edit the service file to match your COM ports and device IDs, then start:
+
+```bash
+sudo nano /etc/systemd/system/openice-multidevice.service
+sudo systemctl daemon-reload
+sudo systemctl enable openice-multidevice
+sudo systemctl start openice-multidevice
+```
+
+### Manual deployment
 
 Create a service user and log directory:
 
 ```bash
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin openice || true
+sudo usermod -aG dialout openice
 sudo mkdir -p /opt/openice-headless /var/log/openice
-sudo chown -R openice:openice /var/log/openice
+sudo chown openice:openice /var/log/openice
+sudo chmod 750 /var/log/openice
 ```
 
-Copy this package to `/opt/openice-headless`, build it, then use one of the following service files.
+Copy this package to `/opt/openice-headless`, build it, then install the service and logrotate config:
 
-### Multidevice service
+```bash
+sudo cp openice-multidevice.service /etc/systemd/system/
+sudo cp deploy/logrotate-openice /etc/logrotate.d/openice
+```
 
-`/etc/systemd/system/openice-multidevice.service`:
+### Advantech AIR-021 setup
 
-```ini
-[Unit]
-Description=OpenICE Headless Multidevice JSON Gateway
-After=network-online.target
-Wants=network-online.target
+The AIR-021 has two built-in RS-232 COM ports, typically `/dev/ttyS0` and `/dev/ttyS1`. Identify which port connects to which device:
 
-[Service]
-Type=simple
-User=openice
-Group=openice
-WorkingDirectory=/opt/openice-headless/openice-headless-json-gateway-patched
-ExecStart=/opt/openice-headless/openice-headless-json-gateway-patched/devices/multidevice/build/install/multidevice/bin/multidevice \
-  --gateway-id jetson_nicu_01 \
-  --bed-id bed_12 \
-  --philips-serial /dev/philips_monitor_01 \
-  --philips-device-id philips_monitor_01 \
-  --draeger-serial /dev/draeger_vent_01 \
+```bash
+dmesg | grep tty
+setserial -g /dev/ttyS*
+```
+
+Example for Philips MX800 on COM1 + Draeger ventilator on COM2:
+
+```bash
+devices/multidevice/build/install/multidevice/bin/multidevice \
+  --gateway-id air021_01 \
+  --bed-id bed_01 \
+  --philips-serial /dev/ttyS0 \
+  --philips-device-id philips_mx800_01 \
+  --draeger-serial /dev/ttyS1 \
   --draeger-device-id draeger_vent_01 \
-  --jsonl /var/log/openice/bed12-events.jsonl \
-  --dead-letter-jsonl /var/log/openice/bed12-dead-letter.jsonl
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
+  --draeger-baud 19200 \
+  --jsonl /var/log/openice/bed01.jsonl \
+  --dead-letter-jsonl /var/log/openice/bed01-dead-letter.jsonl
 ```
+
+The AIR-021 runs x86_64 Linux, so use:
+
+```bash
+export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+```
+
+### Systemd service (hardened)
+
+The included `openice-multidevice.service` has security hardening enabled:
+
+- `ProtectSystem=strict` — filesystem is read-only except `/var/log/openice`
+- `ProtectHome=yes`, `PrivateTmp=yes`, `NoNewPrivileges=yes` — sandboxing
+- `DeviceAllow=/dev/ttyS0 rw`, `DeviceAllow=/dev/ttyS1 rw` — only the two serial ports are accessible
+- `MemoryMax=512M`, `TasksMax=64` — resource limits
+- `WatchdogSec=120` — systemd restarts the process if it hangs for 2 minutes
+- `Restart=always`, `RestartSec=5` — auto-restart on crash
+
+Edit the `DeviceAllow` lines if your serial ports are different (e.g. `/dev/ttyUSB0`).
 
 Enable and start:
 
@@ -449,7 +496,70 @@ sudo systemctl start openice-multidevice
 sudo journalctl -u openice-multidevice -f
 ```
 
-Replace `openice`, `/opt/openice-headless/...`, device IDs, serial paths, and bed IDs with your deployment values.
+---
+
+## Monitoring
+
+### Heartbeat logging
+
+The multi-device gateway logs a `HEARTBEAT` line to stderr every 60 seconds:
+
+```
+HEARTBEAT | threads: draeger-medibus-supervisor=alive philips-mib-rs232-supervisor=alive | devices: draeger_vent_01=connected(last_data=3s_ago) philips_mx800_01=connected(last_data=1s_ago)
+```
+
+Device state changes are logged immediately:
+
+```
+DEVICE_STATE draeger_vent_01: connected
+DEVICE_STATE philips_mx800_01: disconnected
+```
+
+View live logs:
+
+```bash
+sudo journalctl -u openice-multidevice -f
+```
+
+Filter for heartbeats or state changes:
+
+```bash
+sudo journalctl -u openice-multidevice | grep HEARTBEAT
+sudo journalctl -u openice-multidevice | grep DEVICE_STATE
+```
+
+### What to watch for
+
+- `last_data` growing beyond a few seconds: the device may be powered off or the cable disconnected
+- Thread state `DEAD`: a supervisor thread has exited unexpectedly
+- `DEVICE_STATE ... disconnected` without a subsequent `connected`: check the physical connection
+
+### Log rotation
+
+Logs are rotated daily by the included logrotate config (`deploy/logrotate-openice`):
+
+- 30 days retention
+- Compressed after 1 day
+- `copytruncate` so the running process does not need a restart
+- New files created with `0640` permissions (owner read/write, group read only)
+
+Install manually if you did not use `deploy/deploy.sh`:
+
+```bash
+sudo cp deploy/logrotate-openice /etc/logrotate.d/openice
+```
+
+### File permissions
+
+JSONL output files are created with `0640` permissions (owner read/write, group read only). Patient data is not world-readable.
+
+### Service health check
+
+```bash
+sudo systemctl status openice-multidevice
+ls -la /var/log/openice/
+du -sh /var/log/openice/
+```
 
 ---
 
