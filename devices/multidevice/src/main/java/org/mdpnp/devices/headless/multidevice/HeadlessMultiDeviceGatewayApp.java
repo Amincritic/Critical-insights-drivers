@@ -12,7 +12,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.mdpnp.devices.draeger.medibus.HeadlessDraegerMedibus;
 import org.mdpnp.devices.draeger.medibus.types.Command;
@@ -41,6 +43,42 @@ import org.mdpnp.devices.serial.SerialSocket.StopBits;
  */
 public final class HeadlessMultiDeviceGatewayApp {
     private HeadlessMultiDeviceGatewayApp() { }
+
+    private static final long HEARTBEAT_INTERVAL_MS = 60_000L;
+    private static final ConcurrentHashMap<String, AtomicLong> lastDataReceived = new ConcurrentHashMap<String, AtomicLong>();
+    private static final ConcurrentHashMap<String, String> deviceState = new ConcurrentHashMap<String, String>();
+
+    static void recordDataReceived(String deviceId) {
+        AtomicLong ts = lastDataReceived.get(deviceId);
+        if (ts == null) {
+            lastDataReceived.putIfAbsent(deviceId, new AtomicLong(System.currentTimeMillis()));
+        } else {
+            ts.set(System.currentTimeMillis());
+        }
+    }
+
+    static void setDeviceState(String deviceId, String state) {
+        String prev = deviceState.put(deviceId, state);
+        if (prev == null || !prev.equals(state)) {
+            System.err.println("DEVICE_STATE " + deviceId + ": " + state);
+        }
+    }
+
+    private static void logHeartbeat(List<Thread> deviceThreads, QueuedJsonPublisher queue) {
+        StringBuilder sb = new StringBuilder("HEARTBEAT | threads: ");
+        for (Thread t : deviceThreads) {
+            sb.append(t.getName()).append("=").append(t.isAlive() ? "alive" : "DEAD").append(" ");
+        }
+        sb.append("| devices: ");
+        long now = System.currentTimeMillis();
+        for (Map.Entry<String, AtomicLong> e : lastDataReceived.entrySet()) {
+            long ageSec = (now - e.getValue().get()) / 1000L;
+            String state = deviceState.getOrDefault(e.getKey(), "unknown");
+            sb.append(e.getKey()).append("=").append(state);
+            sb.append("(last_data=").append(ageSec).append("s_ago) ");
+        }
+        System.err.println(sb.toString().trim());
+    }
 
     public static void main(String[] args) throws Exception {
         final Args a = Args.parse(args);
@@ -75,7 +113,10 @@ public final class HeadlessMultiDeviceGatewayApp {
         if (a.draegerSerial != null) { deviceThreads.add(startDraeger(a, queue, running)); }
 
         System.err.println("Multi-device headless gateway started. gatewayId=" + a.gatewayId + " bedId=" + a.bedId);
-        while (running.get()) { Thread.sleep(60_000L); }
+        while (running.get()) {
+            Thread.sleep(HEARTBEAT_INTERVAL_MS);
+            if (running.get()) { logHeartbeat(deviceThreads, queue); }
+        }
     }
 
     private static MultiJsonPublisher buildSinks(Boolean stdout, String jsonl, String httpUrl, int httpTimeoutMs, Map<String, String> headers, boolean allowInsecureHttp) throws Exception {
@@ -108,8 +149,11 @@ public final class HeadlessMultiDeviceGatewayApp {
                         final NetworkLoop networkLoop = new NetworkLoop();
                         networkLoop.register(adapter, channel);
                         System.err.println("Started Philips adapter host=" + a.philipsHost + ":" + a.philipsPort + " deviceId=" + a.philipsDeviceId);
+                        setDeviceState(a.philipsDeviceId, "connected");
+                        recordDataReceived(a.philipsDeviceId);
                         networkLoop.runLoop();
                     } catch (Exception e) {
+                        setDeviceState(a.philipsDeviceId, "disconnected");
                         System.err.println("Philips network loop stopped: " + e.getMessage() + "; reconnecting in " + a.reconnectMs + " ms");
                     } finally {
                         try { if (channel != null) { channel.close(); } } catch (Exception ignored) { }
@@ -148,8 +192,11 @@ public final class HeadlessMultiDeviceGatewayApp {
 
                         System.err.println("Started Philips MIB/RS232 adapter serial=" + a.philipsSerial + " deviceId=" + a.philipsDeviceId);
                         System.err.println("Philips MIB/RS232 serial settings: 115200 baud, 8N1, no flow control");
+                        setDeviceState(a.philipsDeviceId, "connected");
+                        recordDataReceived(a.philipsDeviceId);
                         networkLoop.runLoop();
                     } catch (Exception e) {
+                        setDeviceState(a.philipsDeviceId, "disconnected");
                         System.err.println("Philips MIB/RS232 loop stopped: " + e.getMessage() + "; reconnecting in " + a.reconnectMs + " ms");
                     } finally {
                         try { if (serialBridge != null) { serialBridge.shutdown(); } } catch (Exception ignored) { }
@@ -192,9 +239,15 @@ public final class HeadlessMultiDeviceGatewayApp {
                         final HeadlessDraegerMedibus medibus = new HeadlessDraegerMedibus(in, out, a.gatewayId, a.bedId, a.draegerDeviceId, queue);
                         poller = startDraegerPoller(medibus, a.draegerPollMs);
                         System.err.println("Started Draeger adapter serial=" + a.draegerSerial + " baud=" + a.draegerBaud + " deviceId=" + a.draegerDeviceId);
-                        while (medibus.receive()) { }
+                        setDeviceState(a.draegerDeviceId, "connected");
+                        recordDataReceived(a.draegerDeviceId);
+                        while (medibus.receive()) {
+                            recordDataReceived(a.draegerDeviceId);
+                        }
+                        setDeviceState(a.draegerDeviceId, "disconnected");
                         System.err.println("Draeger reader stopped; reconnecting");
                     } catch (Exception e) {
+                        setDeviceState(a.draegerDeviceId, "disconnected");
                         System.err.println("Draeger adapter error: " + e.getMessage() + "; reconnecting in " + a.reconnectMs + " ms");
                     } finally {
                         if (poller != null) { poller.interrupt(); }
@@ -223,6 +276,9 @@ public final class HeadlessMultiDeviceGatewayApp {
                         medibus.sendCommand(Command.ReqAlarmsCP1);
                         medibus.sendCommand(Command.ReqAlarmsCP2);
                         Thread.sleep(pollMs);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
                     } catch (Exception e) {
                         System.err.println("Draeger poller error: " + e.getMessage());
                         sleepQuietly(1000L);

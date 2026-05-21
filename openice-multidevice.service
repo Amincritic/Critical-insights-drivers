@@ -9,6 +9,7 @@ User=openice
 Group=openice
 WorkingDirectory=/opt/openice-headless
 Environment=JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+
 ExecStart=/opt/openice-headless/devices/multidevice/build/install/multidevice/bin/multidevice \
   --gateway-id air021_01 \
   --bed-id bed_01 \
@@ -19,10 +20,33 @@ ExecStart=/opt/openice-headless/devices/multidevice/build/install/multidevice/bi
   --draeger-baud 19200 \
   --jsonl /var/log/openice/bed01.jsonl \
   --dead-letter-jsonl /var/log/openice/bed01-dead-letter.jsonl
+
 Restart=always
 RestartSec=5
+WatchdogSec=120
+
 StandardOutput=journal
 StandardError=journal
+
+# Security hardening
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/log/openice
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+# Allow access to serial devices
+SupplementaryGroups=dialout
+DeviceAllow=/dev/ttyS0 rw
+DeviceAllow=/dev/ttyS1 rw
+
+# Resource limits
+LimitNOFILE=4096
+MemoryMax=512M
+TasksMax=64
 
 [Install]
 WantedBy=multi-user.target
