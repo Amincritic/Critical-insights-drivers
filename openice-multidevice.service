@@ -1,0 +1,28 @@
+[Unit]
+Description=OpenICE Headless Multidevice JSON Gateway (Philips MX800 + Draeger)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=openice
+Group=openice
+WorkingDirectory=/opt/openice-headless
+Environment=JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+ExecStart=/opt/openice-headless/devices/multidevice/build/install/multidevice/bin/multidevice \
+  --gateway-id air021_01 \
+  --bed-id bed_01 \
+  --philips-serial /dev/ttyS0 \
+  --philips-device-id philips_mx800_01 \
+  --draeger-serial /dev/ttyS1 \
+  --draeger-device-id draeger_vent_01 \
+  --draeger-baud 19200 \
+  --jsonl /var/log/openice/bed01.jsonl \
+  --dead-letter-jsonl /var/log/openice/bed01-dead-letter.jsonl
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
