@@ -46,6 +46,8 @@ sudo journalctl -u openice-multidevice -f
 | `./test.sh 9100 60` | Same but on port 9100 for 60 seconds |
 | `./run.sh --help` | Shows all run options with examples |
 | `./run.sh [options]` | Runs the gateway with real devices (see `--help` for modes) |
+| `./hil-test.sh` | HIL test: virtual serial ports with socat + fake devices (requires `socat`) |
+| `./hil-test.sh --duration 120` | HIL test for 120 seconds |
 | `sudo bash deploy/deploy.sh` | Production deployment: creates user, installs service, logrotate |
 
 See sections below for detailed options and configuration.
@@ -788,6 +790,78 @@ java -cp test-tools FakeDraegerDevice 9200
 ```
 
 Then use `--tcp-port 9200` in the gateway command.
+
+---
+
+## HIL (Hardware-in-the-Loop) testing
+
+HIL testing uses virtual serial ports to simulate real RS-232 connections. This tests the full serial path — port open/close, MEDIBUS framing, data parsing, reconnection — without needing physical devices.
+
+### Prerequisites
+
+```bash
+sudo apt install socat
+```
+
+### Run HIL test
+
+```bash
+# Draeger only (default, 30 seconds)
+./hil-test.sh
+
+# Longer test
+./hil-test.sh --duration 120
+
+# Both devices (Philips placeholder + Draeger)
+./hil-test.sh --multi
+
+# With real loopback cables on COM ports
+./hil-test.sh --loopback
+```
+
+### How it works
+
+```
+┌──────────────────┐     socat PTY pair     ┌──────────────────┐
+│ FakeDraegerSerial │ ←──── /dev/pts/X ────→ │  Gateway         │
+│ (simulator)       │      /dev/pts/Y        │  (--serial mode) │
+└──────────────────┘     virtual RS-232      └──────────────────┘
+```
+
+1. `socat` creates a virtual serial port pair (two linked PTYs)
+2. The simulator (`FakeDraegerSerial`) opens one end and sends MEDIBUS responses
+3. The gateway opens the other end with `--serial` and polls for data
+4. JSON events are captured to `/tmp/hil-test-output.jsonl`
+5. Results are reported at the end (total events, vitals, errors)
+
+### Manual HIL setup
+
+For more control, run each component separately:
+
+**Terminal 1** — create virtual serial pair:
+```bash
+socat -d -d \
+  pty,raw,echo=0,link=/tmp/draeger-device \
+  pty,raw,echo=0,link=/tmp/draeger-gateway
+```
+
+**Terminal 2** — start simulator:
+```bash
+java -cp test-tools FakeDraegerSerial /tmp/draeger-device
+```
+
+**Terminal 3** — start gateway:
+```bash
+./run.sh --draeger-serial /tmp/draeger-gateway --stdout
+```
+
+### What HIL testing verifies
+
+- Serial port open/close lifecycle
+- MEDIBUS protocol framing over real serial byte streams (not TCP)
+- Data parsing and JSON output
+- Gateway reconnection when the simulator is killed and restarted
+- Serial baud rate and port configuration
 
 ---
 
