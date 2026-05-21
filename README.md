@@ -18,32 +18,35 @@ It reuses the OpenICE protocol parsers and publishes normalized JSON to stdout, 
 ```bash
 # 1. Install JDK 17 (skip if already installed)
 sudo apt update && sudo apt install -y openjdk-17-jdk
-export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64   # or java-17-openjdk-arm64 on Jetson
 
-# 2. Build
-./gradlew clean build
-./gradlew :devices:draeger:installDist :devices:philips:installDist :devices:multidevice:installDist
+# 2. Setup (downloads Gradle, builds, compiles test tools)
+./setup.sh
 
-# 3. Test without real devices (fake Draeger simulator)
-javac test-tools/FakeDraegerDevice.java
-java -cp test-tools FakeDraegerDevice 9100 &
-devices/draeger/build/install/draeger/bin/draeger \
-  --tcp-host 127.0.0.1 --tcp-port 9100 \
-  --device-id test_draeger --gateway-id test_gw --bed-id test_bed --stdout true
+# 3. Test without real devices
+./test.sh
 
-# 4. Run with real devices (Advantech AIR-021 with RS-232)
-devices/multidevice/build/install/multidevice/bin/multidevice \
-  --gateway-id air021_01 --bed-id bed_01 \
-  --philips-serial /dev/ttyS0 --philips-device-id philips_mx800_01 \
-  --draeger-serial /dev/ttyS1 --draeger-device-id draeger_vent_01 \
-  --jsonl /var/log/openice/bed01.jsonl --stdout true
+# 4. Run with real devices
+./run.sh --draeger-serial /dev/ttyS1 --stdout
+./run.sh --philips-serial /dev/ttyS0 --stdout
+./run.sh --multi --philips-serial /dev/ttyS0 --draeger-serial /dev/ttyS1 --stdout
 
-# 5. Deploy as a service (production)
+# 5. Deploy as a systemd service
 sudo bash deploy/deploy.sh
 sudo nano /etc/systemd/system/openice-multidevice.service   # edit COM ports
 sudo systemctl enable --now openice-multidevice
 sudo journalctl -u openice-multidevice -f
 ```
+
+### Script reference
+
+| Script | Purpose |
+|--------|---------|
+| `./setup.sh` | One-time setup: detects JDK, downloads Gradle, builds everything, compiles test tools |
+| `./test.sh` | Runs a fake Draeger device + gateway for 30 seconds, reports events captured |
+| `./test.sh 9100 60` | Same but on port 9100 for 60 seconds |
+| `./run.sh --help` | Shows all run options with examples |
+| `./run.sh [options]` | Runs the gateway with real devices (see `--help` for modes) |
+| `sudo bash deploy/deploy.sh` | Production deployment: creates user, installs service, logrotate |
 
 See sections below for detailed options and configuration.
 
