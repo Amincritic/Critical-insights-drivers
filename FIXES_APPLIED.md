@@ -51,9 +51,20 @@ The Gradle distribution zip itself is not bundled here because it is about 122 M
 ## Build fixes
 
 - Increased Gradle wrapper default heap from 64 MB to 512 MB (`gradlew` line 47) to prevent OOM failures on multi-module builds, especially on constrained devices like Jetson Nano.
+- Fixed `gradle-wrapper.properties` to use `https://` download URL; the `file:` relative URL did not work with the Gradle wrapper.
+
+## Production hardening
+
+- `FileJsonPublisher` now sets JSONL file permissions to `0640` (owner read/write, group read only) on POSIX systems. Prevents world-readable patient data files.
+- `HeadlessMultiDeviceGatewayApp` now logs a `HEARTBEAT` line to stderr every 60 seconds, reporting thread liveness, per-device connection state, and seconds since last data received.
+- `HeadlessMultiDeviceGatewayApp` now tracks and logs `DEVICE_STATE` changes (connected/disconnected) immediately when they occur.
+- `HeadlessDraegerGatewayApp` and `HeadlessMultiDeviceGatewayApp` Draeger poller threads now catch `InterruptedException` separately, re-set the interrupt flag, and exit cleanly instead of swallowing the interrupt.
+- Hardened systemd service file with `ProtectSystem=strict`, `ProtectHome=yes`, `PrivateTmp=yes`, `NoNewPrivileges=yes`, `DeviceAllow` restricted to serial ports, `MemoryMax=512M`, `TasksMax=64`, and `WatchdogSec=120`.
+- Added `deploy/logrotate-openice` for daily log rotation with 30-day retention and compression.
+- Added `deploy/deploy.sh` for one-command production deployment (creates service user, builds, installs, configures logrotate and systemd).
 
 ## Verification done here
 
 - Compiled the changed headless/common publisher classes with `javac`.
 - Compiled the changed Philips/Draeger/multidevice classes with a local SLF4J stub to catch syntax/type errors in modified code paths.
-- Could not run a full Gradle build in this sandbox because external Gradle/Maven artifacts are not locally cached here.
+- Full Gradle build (`./gradlew clean build`) passes with all 37 tasks successful, all tests passing.
