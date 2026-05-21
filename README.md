@@ -13,6 +13,42 @@ It reuses the OpenICE protocol parsers and publishes normalized JSON to stdout, 
 
 ---
 
+## Quick start
+
+```bash
+# 1. Install JDK 17 (skip if already installed)
+sudo apt update && sudo apt install -y openjdk-17-jdk
+export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64   # or java-17-openjdk-arm64 on Jetson
+
+# 2. Build
+./gradlew clean build
+./gradlew :devices:draeger:installDist :devices:philips:installDist :devices:multidevice:installDist
+
+# 3. Test without real devices (fake Draeger simulator)
+javac test-tools/FakeDraegerDevice.java
+java -cp test-tools FakeDraegerDevice 9100 &
+devices/draeger/build/install/draeger/bin/draeger \
+  --tcp-host 127.0.0.1 --tcp-port 9100 \
+  --device-id test_draeger --gateway-id test_gw --bed-id test_bed --stdout true
+
+# 4. Run with real devices (Advantech AIR-021 with RS-232)
+devices/multidevice/build/install/multidevice/bin/multidevice \
+  --gateway-id air021_01 --bed-id bed_01 \
+  --philips-serial /dev/ttyS0 --philips-device-id philips_mx800_01 \
+  --draeger-serial /dev/ttyS1 --draeger-device-id draeger_vent_01 \
+  --jsonl /var/log/openice/bed01.jsonl --stdout true
+
+# 5. Deploy as a service (production)
+sudo bash deploy/deploy.sh
+sudo nano /etc/systemd/system/openice-multidevice.service   # edit COM ports
+sudo systemctl enable --now openice-multidevice
+sudo journalctl -u openice-multidevice -f
+```
+
+See sections below for detailed options and configuration.
+
+---
+
 ## What was fixed in this version
 
 - Added Gradle `application` packaging for runnable modules, so `installDist` now produces runnable scripts.
@@ -27,6 +63,27 @@ It reuses the OpenICE protocol parsers and publishes normalized JSON to stdout, 
 - Fixed `SerialProviderFactory` logging precedence bug.
 - Added Draeger `unit` / `unitCode` fields where a safe heuristic can infer units.
 - Updated README commands to match the patched Gradle/application layout.
+
+---
+
+## Device prerequisites
+
+Before connecting, ensure the following settings on the physical devices:
+
+**Philips MX800 (MIB/RS232):**
+- Go to Configuration > Network > MIB/RS232 and enable data export
+- Serial settings are fixed at 115200 baud, 8N1, no flow control (set automatically by the driver)
+- Use a straight-through RS-232 cable (not null-modem)
+
+**Draeger ventilator (MEDIBUS):**
+- Enable the MEDIBUS protocol on the ventilator (consult Draeger service manual)
+- Default baud rate is 19200 (adjustable with `--draeger-baud`)
+- Serial settings: 8 data bits, no parity, 1 stop bit, no flow control
+
+**Advantech AIR-021 (or other edge gateway):**
+- Identify your COM ports: `dmesg | grep tty` (typically `/dev/ttyS0` and `/dev/ttyS1`)
+- Ensure your user has serial access: `sudo usermod -aG dialout $USER`
+- Use JDK 17: `export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64`
 
 ---
 
