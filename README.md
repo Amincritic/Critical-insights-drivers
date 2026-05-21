@@ -650,6 +650,87 @@ If a Draeger unit cannot be inferred safely, `unit` and `unitCode` are `null`.
 
 ---
 
+## Testing without devices
+
+A fake Draeger MEDIBUS device simulator is included in `test-tools/`. It responds to MEDIBUS poll commands with synthetic vital signs (tidal volume, respiratory rate, airway pressure, FiO2, PEEP, compliance, resistance) that vary over time.
+
+### Compile the simulator
+
+```bash
+javac test-tools/FakeDraegerDevice.java
+```
+
+### Run in two terminals
+
+**Terminal 1** — start the fake device on TCP port 9100:
+
+```bash
+java -cp test-tools FakeDraegerDevice 9100
+```
+
+You should see:
+
+```
+FakeDraegerDevice listening on port 9100
+Waiting for gateway connection...
+```
+
+**Terminal 2** — connect the gateway:
+
+```bash
+devices/draeger/build/install/draeger/bin/draeger \
+  --tcp-host 127.0.0.1 --tcp-port 9100 \
+  --gateway-id test_gw --bed-id test_bed \
+  --device-id test_draeger --stdout true
+```
+
+### Expected output
+
+The gateway will print JSON events every second:
+
+```json
+{"gatewayId":"test_gw","bedId":"test_bed","deviceId":"test_draeger","vendor":"draeger","protocol":"medibus","eventType":"vital","metric":"BreathingPressure_(in_mbar)","unit":"cmH2O","rawValue":"  23","value":23}
+```
+
+The fake device terminal will log each command it receives:
+
+```
+Gateway connected from /127.0.0.1:54321
+  Received command: 0x52 (ReqDeviceId) [cycle 1]
+    -> Device ID: Evita V500  SN:FAKE001  SW:03.20n
+  Received command: 0x44 (ReqDateTime) [cycle 2]
+    -> DateTime: 210526143000
+  Received command: 0x24 (ReqMeasuredCP1) [cycle 3]
+    -> CP1: VT=450mL RR=16 Paw=22cmH2O FiO2=40%
+```
+
+### Testing with JSONL output
+
+```bash
+devices/draeger/build/install/draeger/bin/draeger \
+  --tcp-host 127.0.0.1 --tcp-port 9100 \
+  --gateway-id test_gw --bed-id test_bed \
+  --device-id test_draeger \
+  --jsonl /tmp/test-draeger.jsonl --stdout true
+```
+
+Then inspect the file:
+
+```bash
+tail -f /tmp/test-draeger.jsonl
+wc -l /tmp/test-draeger.jsonl   # count events received
+```
+
+### Custom port
+
+```bash
+java -cp test-tools FakeDraegerDevice 9200
+```
+
+Then use `--tcp-port 9200` in the gateway command.
+
+---
+
 ## Troubleshooting
 
 ### `installDist` not found
