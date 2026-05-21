@@ -25,9 +25,10 @@ sudo apt update && sudo apt install -y openjdk-17-jdk
 # 3. Test without real devices
 ./test.sh
 
-# 4. Run with real devices
-./run.sh --draeger-serial /dev/ttyS1 --stdout
-./run.sh --philips-serial /dev/ttyS0 --stdout
+# 4. Run with real devices (auto-detect COM ports)
+./run.sh --auto --stdout
+
+# Or specify ports manually
 ./run.sh --multi --philips-serial /dev/ttyS0 --draeger-serial /dev/ttyS1 --stdout
 
 # 5. Deploy as a systemd service
@@ -44,6 +45,7 @@ sudo journalctl -u openice-multidevice -f
 | `./setup.sh` | One-time setup: detects JDK, downloads Gradle, builds everything, compiles test tools |
 | `./test.sh` | Runs a fake Draeger device + gateway for 30 seconds, reports events captured |
 | `./test.sh 9100 60` | Same but on port 9100 for 60 seconds |
+| `./run.sh --auto --stdout` | Auto-detect devices on COM ports and run |
 | `./run.sh --help` | Shows all run options with examples |
 | `./run.sh [options]` | Runs the gateway with real devices (see `--help` for modes) |
 | `./hil-test.sh` | HIL test: virtual serial ports with socat + fake devices (requires `socat`) |
@@ -508,26 +510,46 @@ sudo cp deploy/logrotate-openice /etc/logrotate.d/openice
 
 ### Advantech AIR-021 setup
 
-The AIR-021 has two built-in RS-232 COM ports, typically `/dev/ttyS0` and `/dev/ttyS1`. Identify which port connects to which device:
+The AIR-021 has two built-in RS-232 COM ports, typically `/dev/ttyS0` and `/dev/ttyS1`.
+
+**Auto-detect (recommended)** — no need to know which cable goes where:
 
 ```bash
-dmesg | grep tty
-setserial -g /dev/ttyS*
+./run.sh --auto --jsonl /var/log/openice/bed01.jsonl --stdout
 ```
 
-Example for Philips MX800 on COM1 + Draeger ventilator on COM2:
+This probes each port automatically:
+1. Sends a MEDIBUS request at 19200 baud — the port that responds is **Draeger**
+2. Checks remaining ports at 115200 baud for data — that's **Philips**
+3. Launches the correct gateway mode
+
+You can also run detection standalone to see what's connected:
 
 ```bash
-devices/multidevice/build/install/multidevice/bin/multidevice \
-  --gateway-id air021_01 \
-  --bed-id bed_01 \
+java -cp test-tools PortDetector
+```
+
+Output:
+```
+Scanning 4 port(s): [/dev/ttyS0, /dev/ttyS1, /dev/ttyS2, /dev/ttyS3]
+
+  /dev/ttyS0 ... no MEDIBUS response
+  /dev/ttyS1 ... DRAEGER (MEDIBUS response detected)
+  /dev/ttyS2 ... SKIP (cannot open)
+  /dev/ttyS3 ... SKIP (cannot open)
+  /dev/ttyS0 (115200 probe) ... PHILIPS (data at 115200 baud)
+
+DRAEGER=/dev/ttyS1
+PHILIPS=/dev/ttyS0
+```
+
+**Manual port selection** — if you know which port is which:
+
+```bash
+./run.sh --multi \
   --philips-serial /dev/ttyS0 \
-  --philips-device-id philips_mx800_01 \
   --draeger-serial /dev/ttyS1 \
-  --draeger-device-id draeger_vent_01 \
-  --draeger-baud 19200 \
-  --jsonl /var/log/openice/bed01.jsonl \
-  --dead-letter-jsonl /var/log/openice/bed01-dead-letter.jsonl
+  --jsonl /var/log/openice/bed01.jsonl --stdout
 ```
 
 The AIR-021 runs x86_64 Linux, so use:
