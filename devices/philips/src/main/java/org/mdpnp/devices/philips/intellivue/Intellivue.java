@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.mdpnp.devices.io.util.HexUtil;
 import org.mdpnp.devices.net.NetworkConnection;
@@ -214,6 +215,42 @@ public class Intellivue implements NetworkConnection {
 
     private final static int MAX_U_SHORT = (1 << Short.SIZE);
 
+    /**
+     * Per the Philips IntelliVue Data Export Programming Guide (Network Load Consideration),
+     * the monitor accepts at most 1 message per second per poll type. Exceeding this rate
+     * causes the monitor to discard messages. This map tracks the last send time per
+     * ObjectClass to enforce the limit.
+     */
+    private static final long MIN_POLL_INTERVAL_MS = 1000L;
+    private final ConcurrentHashMap<Integer, Long> lastPollTimeByType = new ConcurrentHashMap<Integer, Long>();
+
+    /**
+     * Keep-alive interval. The Philips protocol requires periodic communication to
+     * maintain the association. If no poll is sent within this interval, a keep-alive
+     * poll is sent automatically.
+     */
+    private static final long KEEP_ALIVE_INTERVAL_MS = 10000L;
+    private volatile long lastSendTime = 0L;
+
+    private boolean pollRateLimitOk(int objectTypeCode) {
+        long now = System.currentTimeMillis();
+        Long prev = lastPollTimeByType.get(objectTypeCode);
+        if (prev != null && (now - prev) < MIN_POLL_INTERVAL_MS) {
+            log.debug("Poll rate limited for objectType 0x{}: {}ms since last poll",
+                    Integer.toHexString(objectTypeCode), now - prev);
+            return false;
+        }
+        lastPollTimeByType.put(objectTypeCode, now);
+        return true;
+    }
+
+    /**
+     * Returns true if a keep-alive should be sent (no message sent within KEEP_ALIVE_INTERVAL_MS).
+     */
+    public boolean isKeepAliveNeeded() {
+        return lastSendTime > 0L && (System.currentTimeMillis() - lastSendTime) > KEEP_ALIVE_INTERVAL_MS;
+    }
+
     private synchronized int nextInvoke() {
         return (invoke = ++invoke >= MAX_U_SHORT ? 0 : invoke);
     }
@@ -232,6 +269,7 @@ public class Intellivue implements NetworkConnection {
     }
 
     public int requestSinglePoll(ObjectClass objectType, AttributeId attrGroup) throws IOException {
+        if (!pollRateLimitOk(objectType.asInt())) { return -1; }
         int invoke = nextInvoke();
         DataExportInvoke message = new DataExportInvokeImpl();
         message.setCommandType(CommandType.ConfirmedAction);
@@ -264,6 +302,7 @@ public class Intellivue implements NetworkConnection {
     }
 
     public int requestExtendedPoll(ObjectClass objectType, Long time, AttributeId attrGroup) throws IOException {
+        if (!pollRateLimitOk(objectType.asInt())) { return -1; }
 
         int invoke = nextInvoke();
         DataExportInvoke message = new DataExportInvokeImpl();
@@ -515,8 +554,8 @@ public class Intellivue implements NetworkConnection {
         AssociationConnect req = new AssociationConnectImpl();
         PollProfileSupport pps = req.getUserInfo().getPollProfileSupport();
 
-        // On our Revision J MP70 500ms is the minimum supported
-        pps.getMinPollPeriod().fromMilliseconds(500L);
+        // Per Philips guide: max 1 message/second per poll type
+        pps.getMinPollPeriod().fromMilliseconds(1000L);
         pps.setMaxMtuRx(1456);
         pps.setMaxMtuTx(1456);
 
@@ -602,6 +641,8 @@ public class Intellivue implements NetworkConnection {
 
         // Try to write the datagram, if unavailable then set interestOps
 
+        lastSendTime = System.currentTimeMillis();
+
         int cnt = write(registeredChannel, message);
         if (cnt == 0) {
             registeredKey.interestOps(registeredKey.interestOps() | SelectionKey.OP_WRITE);
@@ -646,6 +687,16 @@ public class Intellivue implements NetworkConnection {
 
     @Override
     public void read(SelectionKey sk) throws IOException {
+        // Send keep-alive if no message has been sent recently (per Philips protocol timeout spec)
+        if (isKeepAliveNeeded()) {
+            try {
+                requestKeepAlive();
+                log.debug("Sent keep-alive poll to maintain association");
+            } catch (Exception e) {
+                log.warn("Keep-alive poll failed: " + e.getMessage());
+            }
+        }
+
         if (sk.channel() instanceof DatagramChannel) {
             DatagramChannel channel = (DatagramChannel) sk.channel();
 
