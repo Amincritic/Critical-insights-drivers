@@ -5,6 +5,7 @@ set -euo pipefail
 #
 # Usage:
 #   ./run.sh --help
+#   ./run.sh --auto                        # auto-detect devices on COM ports
 #   ./run.sh --draeger-serial /dev/ttyS1
 #   ./run.sh --philips-serial /dev/ttyS0 --draeger-serial /dev/ttyS1
 #   ./run.sh --draeger-tcp 192.168.10.60:4001
@@ -40,6 +41,7 @@ Usage:
   ./run.sh [mode] [options]
 
 Modes (pick one):
+  --auto                               Auto-detect devices on COM ports
   --draeger-serial <port>              Draeger ventilator over RS-232
   --draeger-tcp <host:port>            Draeger ventilator over TCP
   --philips-serial <port>              Philips MX800 over MIB/RS232
@@ -61,6 +63,12 @@ Common options:
   --help                               Show this help
 
 Examples:
+  # Auto-detect devices on COM ports and run
+  ./run.sh --auto --stdout
+
+  # Auto-detect with JSONL output
+  ./run.sh --auto --jsonl /var/log/openice/bed01.jsonl --stdout
+
   # Draeger only, output to terminal
   ./run.sh --draeger-serial /dev/ttyS1 --stdout
 
@@ -92,6 +100,7 @@ HELP
 GATEWAY_ID="air021_01"
 BED_ID="bed_01"
 MODE=""
+AUTO_DETECT=false
 DRAEGER_SERIAL=""
 DRAEGER_TCP_HOST=""
 DRAEGER_TCP_PORT=""
@@ -110,6 +119,7 @@ if [ $# -eq 0 ]; then show_help; fi
 while [ $# -gt 0 ]; do
     case "$1" in
         --help) show_help ;;
+        --auto) AUTO_DETECT=true; shift ;;
         --multi) MODE="multi"; shift ;;
         --draeger-serial) DRAEGER_SERIAL="$2"; MODE="${MODE:-draeger}"; shift 2 ;;
         --draeger-tcp)
@@ -140,6 +150,52 @@ done
 # Default: if no output specified, enable stdout
 if [ -z "$JSONL" ] && [ -z "$STDOUT_FLAG" ] && [ -z "$HTTP_URL" ]; then
     OUTPUT_ARGS+=(--stdout true)
+fi
+
+# --- Auto-detect ---
+if [ "$AUTO_DETECT" = true ]; then
+    echo "=== Auto-detecting devices on serial ports ==="
+    echo ""
+
+    # Compile detector if needed
+    if [ ! -f test-tools/PortDetector.class ] || \
+       [ test-tools/PortDetector.java -nt test-tools/PortDetector.class ]; then
+        "$JAVA_HOME/bin/javac" test-tools/PortDetector.java
+    fi
+
+    # Run detection
+    DETECT_OUTPUT=$("$JAVA_HOME/bin/java" -cp test-tools PortDetector 2>/dev/tty || true)
+
+    if [ -z "$DETECT_OUTPUT" ]; then
+        echo "ERROR: No devices detected on any serial port."
+        echo "Check cables and device power, then try again."
+        echo "Or specify ports manually: ./run.sh --draeger-serial /dev/ttyS1"
+        exit 1
+    fi
+
+    # Parse results
+    DETECTED_DRAEGER=$(echo "$DETECT_OUTPUT" | grep "^DRAEGER=" | cut -d= -f2 || true)
+    DETECTED_PHILIPS=$(echo "$DETECT_OUTPUT" | grep "^PHILIPS=" | cut -d= -f2 || true)
+
+    if [ -n "$DETECTED_DRAEGER" ] && [ -n "$DETECTED_PHILIPS" ]; then
+        MODE="multi"
+        DRAEGER_SERIAL="$DETECTED_DRAEGER"
+        PHILIPS_SERIAL="$DETECTED_PHILIPS"
+        echo "Auto-detected: Draeger on $DRAEGER_SERIAL, Philips on $PHILIPS_SERIAL"
+    elif [ -n "$DETECTED_DRAEGER" ]; then
+        MODE="draeger"
+        DRAEGER_SERIAL="$DETECTED_DRAEGER"
+        echo "Auto-detected: Draeger on $DRAEGER_SERIAL"
+    elif [ -n "$DETECTED_PHILIPS" ]; then
+        MODE="philips-serial"
+        PHILIPS_SERIAL="$DETECTED_PHILIPS"
+        echo "Auto-detected: Philips on $PHILIPS_SERIAL"
+    else
+        echo "ERROR: Could not identify any devices."
+        echo "Specify ports manually: ./run.sh --draeger-serial /dev/ttyS1"
+        exit 1
+    fi
+    echo ""
 fi
 
 echo "=== OpenICE Gateway ==="

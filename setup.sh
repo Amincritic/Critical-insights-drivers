@@ -74,9 +74,11 @@ echo "    devices/multidevice/build/install/multidevice/bin/multidevice"
 
 # --- Compile test tools ---
 echo ""
-echo "  Compiling test simulator..."
+echo "  Compiling test tools..."
 "$JAVA_HOME/bin/javac" test-tools/FakeDraegerDevice.java
-echo "    test-tools/FakeDraegerDevice.class"
+"$JAVA_HOME/bin/javac" test-tools/FakeDraegerSerial.java
+"$JAVA_HOME/bin/javac" test-tools/PortDetector.java
+echo "    FakeDraegerDevice, FakeDraegerSerial, PortDetector"
 
 echo ""
 echo "=== Setup complete ==="
