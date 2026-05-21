@@ -39,6 +39,19 @@ gradle/wrapper/gradle-7.6-bin.zip
 
 The Gradle distribution zip itself is not bundled here because it is about 122 MB. Once placed there, `./gradlew` will not need internet to download Gradle.
 
+## Checksum/resource-leak fixes
+
+- `ChecksumOutputStream` now computes checksums for bulk `write(byte[])` and `write(byte[], int, int)` calls. Previously only the single-byte `write(int)` updated the checksum, causing incorrect MEDIBUS protocol checksums when array writes were used.
+- `TCPSerialProvider.connect()` now closes the `Socket` if `connect()` throws, preventing file descriptor leaks on repeated connection failures.
+- `HeadlessDraegerGatewayApp.openTransport()` now closes the `Socket` if `getInputStream()` or `getOutputStream()` throws after socket creation.
+- `SerialProviderFactory.addCandidates()` now closes `BufferedReader` in a finally block so the stream is released even if `readLine()` throws.
+- `HeadlessDraegerGatewayApp` poller thread now catches `InterruptedException` separately, re-sets the interrupt flag, and exits the loop cleanly instead of swallowing the interrupt.
+- Fixed raw type `Class` → `Class<?>` in `SerialProviderFactory.locateDefaultProvider()`.
+
+## Build fixes
+
+- Increased Gradle wrapper default heap from 64 MB to 512 MB (`gradlew` line 47) to prevent OOM failures on multi-module builds, especially on constrained devices like Jetson Nano.
+
 ## Verification done here
 
 - Compiled the changed headless/common publisher classes with `javac`.
