@@ -1,0 +1,10 @@
+// Headless-only OpenICE subset.
+// Intentionally excludes OpenICE GUI/demo-app modules, JavaFX/Swing apps, and DDS data-type modules.
+include 'devices:common'
+include 'devices:philips'
+include 'devices:draeger'
+include 'devices:multidevice'
+
+// Needed only for physical serial/MIB-RS232 support.
+include 'interop-lab:purejavacomm'
+include 'interop-lab:demo-purejavacomm'

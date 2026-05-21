@@ -1,0 +1,11 @@
+apply plugin: 'java'
+defaultTasks 'build'
+
+sourceCompatibility = JAVA_VERSION_SOURCE
+targetCompatibility = JAVA_VERSION_CLASSES
+
+dependencies {
+    implementation project(':devices:common')
+    implementation project(':interop-lab:purejavacomm')
+    implementation group: 'org.slf4j', name: 'slf4j-api', version: SLF4J_VERSION
+}
