@@ -1,12 +1,15 @@
 package org.mdpnp.devices.philips.intellivue.headless;
 
 import java.io.IOException;
+import java.net.SocketAddress;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 import org.mdpnp.devices.headless.JsonPublisher;
 import org.mdpnp.devices.philips.intellivue.Intellivue;
+import org.mdpnp.devices.philips.intellivue.association.AssociationAccept;
+import org.mdpnp.devices.philips.intellivue.data.ObjectClass;
 import org.mdpnp.devices.philips.intellivue.action.ExtendedPollDataResult;
 import org.mdpnp.devices.philips.intellivue.action.ObservationPoll;
 import org.mdpnp.devices.philips.intellivue.action.SingleContextPoll;
@@ -36,6 +39,33 @@ public class HeadlessPhilipsIntellivue extends Intellivue {
         this.deviceId = deviceId;
         this.protocolName = protocolName;
         this.publisher = publisher;
+    }
+
+    @Override
+    protected void handle(SocketAddress sockaddr, AssociationAccept message) {
+        System.err.println("Philips association accepted — starting periodic polling");
+        // Start a polling thread — delay briefly to let the network loop process
+        Thread poller = new Thread(new Runnable() {
+            @Override public void run() {
+                try { Thread.sleep(2000); } catch (InterruptedException e) { return; }
+                System.err.println("Philips poller started");
+                while (!Thread.currentThread().isInterrupted()) {
+                    try {
+                        int invoke = requestSinglePoll(ObjectClass.NOM_MOC_VMO_METRIC_NU, null);
+                        System.err.println("Philips poll sent, invoke=" + invoke);
+                        Thread.sleep(2000);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    } catch (Exception e) {
+                        System.err.println("Philips poll error: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+                        try { Thread.sleep(3000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+                    }
+                }
+            }
+        }, "philips-poller");
+        poller.setDaemon(true);
+        poller.start();
     }
 
     @Override

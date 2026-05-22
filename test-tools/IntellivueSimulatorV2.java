@@ -76,8 +76,8 @@ public class IntellivueSimulatorV2 {
     static final int NOM_MOC_SCANNER_CFG      = 0x0012;
 
     // Action types
-    static final int NOM_ACT_POLL_MDIB_DATA     = 0x0C16;
-    static final int NOM_ACT_POLL_MDIB_DATA_EXT = 0x0C17;
+    static final int NOM_ACT_POLL_MDIB_DATA     = 0x0C16; // 3094
+    static final int NOM_ACT_POLL_MDIB_DATA_EXT = 0xF13B; // 61755
 
     // Attribute IDs
     static final int NOM_ATTR_NU_VAL_OBS         = 0x0950;
@@ -652,8 +652,9 @@ public class IntellivueSimulatorV2 {
         }
 
         in.position(0);
-        int sessionType = in.get() & 0xFF; // 0xE1
-        int sessionLen = in.getShort() & 0xFFFF;
+        // SPpdu header: session_id(u16) + p_context_id(u16) per spec page 291
+        int sessionId = in.getShort() & 0xFFFF;  // 0xE100
+        int pContextId = in.getShort() & 0xFFFF; // always 2
 
         // Remote Operation Header
         int roType = in.getShort() & 0xFFFF;
@@ -751,9 +752,8 @@ public class IntellivueSimulatorV2 {
         buf.order(ByteOrder.BIG_ENDIAN);
 
         // Session header
-        buf.putShort((short) 0xE100); // sessionId
-        int lenPos = buf.position();
-        buf.putShort((short) 0);    // contextId = length placeholder
+        buf.putShort((short) 0xE100); // session_id
+        buf.putShort((short) 0x0002); // p_context_id (always 2 per spec)
 
         // ROLRS (linked result)
         buf.putShort((short) ROLRS_APDU);
@@ -776,7 +776,7 @@ public class IntellivueSimulatorV2 {
         buf.putShort((short) 0);
 
         // Action type
-        buf.putShort((short) (NOM_ACT_POLL_MDIB_DATA_EXT & 0xFFFF));
+        buf.putShort((short) (NOM_ACT_POLL_MDIB_DATA & 0xFFFF));
         int actionLenPos = buf.position();
         buf.putShort((short) 0);
 
@@ -808,7 +808,7 @@ public class IntellivueSimulatorV2 {
         buf.putShort(pollInfoLenPos, (short) (obsEnd - pollInfoStart));
 
         // Fix lengths
-        fixLengths(buf, lenPos, roLenPos, cmdLenPos, actionLenPos);
+        fixLengths(buf, roLenPos, cmdLenPos, actionLenPos);
 
         buf.flip();
         return buf;
@@ -819,9 +819,8 @@ public class IntellivueSimulatorV2 {
         buf.order(ByteOrder.BIG_ENDIAN);
 
         // Session header
-        buf.putShort((short) 0xE100); // sessionId
-        int lenPos = buf.position();
-        buf.putShort((short) 0);    // contextId = length placeholder
+        buf.putShort((short) 0xE100); // session_id
+        buf.putShort((short) 0x0002); // p_context_id (always 2 per spec)
 
         // ROLRS
         buf.putShort((short) ROLRS_APDU);
@@ -839,7 +838,7 @@ public class IntellivueSimulatorV2 {
         buf.putShort((short) 0);
         buf.putShort((short) 0);
 
-        buf.putShort((short) (NOM_ACT_POLL_MDIB_DATA_EXT & 0xFFFF));
+        buf.putShort((short) (NOM_ACT_POLL_MDIB_DATA & 0xFFFF));
         int actionLenPos = buf.position();
         buf.putShort((short) 0);
 
@@ -872,7 +871,7 @@ public class IntellivueSimulatorV2 {
         buf.putShort(obsListLenPos, (short) (obsEnd - obsStart));
         buf.putShort(pollInfoLenPos, (short) (obsEnd - pollInfoStart));
 
-        fixLengths(buf, lenPos, roLenPos, cmdLenPos, actionLenPos);
+        fixLengths(buf, roLenPos, cmdLenPos, actionLenPos);
 
         buf.flip();
         return buf;
@@ -883,9 +882,8 @@ public class IntellivueSimulatorV2 {
         buf.order(ByteOrder.BIG_ENDIAN);
 
         // Session header
-        buf.putShort((short) 0xE100); // sessionId
-        int lenPos = buf.position();
-        buf.putShort((short) 0);    // contextId = length placeholder
+        buf.putShort((short) 0xE100); // session_id
+        buf.putShort((short) 0x0002); // p_context_id (always 2 per spec)
 
         // RORS (final result)
         buf.putShort((short) RORS_APDU);
@@ -901,7 +899,7 @@ public class IntellivueSimulatorV2 {
         buf.putShort((short) 0);
         buf.putShort((short) 0);
 
-        buf.putShort((short) (NOM_ACT_POLL_MDIB_DATA_EXT & 0xFFFF));
+        buf.putShort((short) (NOM_ACT_POLL_MDIB_DATA & 0xFFFF));
         int actionLenPos = buf.position();
         buf.putShort((short) 0);
 
@@ -934,7 +932,7 @@ public class IntellivueSimulatorV2 {
         buf.putShort(obsListLenPos, (short) (obsEnd - obsStart));
         buf.putShort(pollInfoLenPos, (short) (obsEnd - pollInfoStart));
 
-        fixLengths(buf, lenPos, roLenPos, cmdLenPos, actionLenPos);
+        fixLengths(buf, roLenPos, cmdLenPos, actionLenPos);
 
         buf.flip();
         return buf;
@@ -948,9 +946,8 @@ public class IntellivueSimulatorV2 {
         ByteBuffer buf = ByteBuffer.allocate(2048);
         buf.order(ByteOrder.BIG_ENDIAN);
 
-        buf.putShort((short) 0xE100); // sessionId
-        int lenPos = buf.position();
-        buf.putShort((short) 0);    // contextId = length placeholder
+        buf.putShort((short) 0xE100); // session_id
+        buf.putShort((short) 0x0002); // p_context_id (always 2 per spec)
 
         buf.putShort((short) RORS_APDU);
         int roLenPos = buf.position();
@@ -965,7 +962,7 @@ public class IntellivueSimulatorV2 {
         buf.putShort((short) 0);
         buf.putShort((short) 0);
 
-        buf.putShort((short) (NOM_ACT_POLL_MDIB_DATA_EXT & 0xFFFF));
+        buf.putShort((short) (NOM_ACT_POLL_MDIB_DATA & 0xFFFF));
         int actionLenPos = buf.position();
         buf.putShort((short) 0);
 
@@ -993,7 +990,7 @@ public class IntellivueSimulatorV2 {
         buf.putShort(obsListLenPos, (short) (obsEnd - obsStart));
         buf.putShort(pollInfoLenPos, (short) (obsEnd - pollInfoStart));
 
-        fixLengths(buf, lenPos, roLenPos, cmdLenPos, actionLenPos);
+        fixLengths(buf, roLenPos, cmdLenPos, actionLenPos);
 
         buf.flip();
         return buf;
@@ -1007,9 +1004,8 @@ public class IntellivueSimulatorV2 {
         ByteBuffer buf = ByteBuffer.allocate(512);
         buf.order(ByteOrder.BIG_ENDIAN);
 
-        buf.putShort((short) 0xE100); // sessionId
-        int lenPos = buf.position();
-        buf.putShort((short) 0);    // contextId = length placeholder
+        buf.putShort((short) 0xE100); // session_id
+        buf.putShort((short) 0x0002); // p_context_id (always 2 per spec)
 
         buf.putShort((short) RORS_APDU);
         int roLenPos = buf.position();
@@ -1051,7 +1047,6 @@ public class IntellivueSimulatorV2 {
 
         // Fix lengths
         int end = buf.position();
-        buf.putShort(lenPos, (short) (end - lenPos - 2));
         buf.putShort(roLenPos, (short) (end - roLenPos - 2));
         buf.putShort(cmdLenPos, (short) (end - cmdLenPos - 2));
 
@@ -1067,9 +1062,8 @@ public class IntellivueSimulatorV2 {
         ByteBuffer buf = ByteBuffer.allocate(512);
         buf.order(ByteOrder.BIG_ENDIAN);
 
-        buf.putShort((short) 0xE100); // sessionId
-        int lenPos = buf.position();
-        buf.putShort((short) 0);    // contextId = length placeholder
+        buf.putShort((short) 0xE100); // session_id
+        buf.putShort((short) 0x0002); // p_context_id (always 2 per spec)
 
         buf.putShort((short) ROIV_APDU);
         int roLenPos = buf.position();
@@ -1091,6 +1085,12 @@ public class IntellivueSimulatorV2 {
         int eventLenPos = buf.position();
         buf.putShort((short) 0); // event length placeholder
 
+        // MDS Create Event data: ManagedObject + AttributeList
+        // (per MdsCreateEventImpl.parse: managedObject first, then attrs)
+        buf.putShort((short) NOM_MOC_VMS_MDS); // managed object oidType
+        buf.putShort((short) 0);               // context
+        buf.putShort((short) 0);               // handle
+
         // Attribute list — minimal: just System Type
         buf.putShort((short) 1);  // count = 1
         int attrListLenPos = buf.position();
@@ -1109,7 +1109,6 @@ public class IntellivueSimulatorV2 {
         buf.putShort(attrListLenPos, (short) (attrEnd - attrStart));
         buf.putShort(eventLenPos, (short) (attrEnd - eventLenPos - 2));
         int end = buf.position();
-        buf.putShort(lenPos, (short) (end - lenPos - 2));
         buf.putShort(roLenPos, (short) (end - roLenPos - 2));
         buf.putShort(cmdLenPos, (short) (end - cmdLenPos - 2));
 
@@ -1125,8 +1124,8 @@ public class IntellivueSimulatorV2 {
         ByteBuffer buf = ByteBuffer.allocate(64);
         buf.order(ByteOrder.BIG_ENDIAN);
 
-        buf.putShort((short) 0xE100); // sessionId
-        buf.putShort((short) 16);   // contextId = length
+        buf.putShort((short) 0xE100); // session_id
+        buf.putShort((short) 0x0002); // p_context_id
         buf.putShort((short) RORS_APDU);
         buf.putShort((short) 12);
         buf.putShort((short) clientInvokeId);
@@ -1720,13 +1719,12 @@ public class IntellivueSimulatorV2 {
     // Length Fixup
     // =====================================================================
 
-    private void fixLengths(ByteBuffer buf, int lenPos, int roLenPos,
+    private void fixLengths(ByteBuffer buf, int roLenPos,
                             int cmdLenPos, int actionLenPos) {
         int end = buf.position();
         buf.putShort(actionLenPos, (short) (end - actionLenPos - 2));
         buf.putShort(cmdLenPos, (short) (end - cmdLenPos - 2));
         buf.putShort(roLenPos, (short) (end - roLenPos - 2));
-        buf.putShort(lenPos, (short) (end - lenPos - 2));
     }
 
     // =====================================================================
