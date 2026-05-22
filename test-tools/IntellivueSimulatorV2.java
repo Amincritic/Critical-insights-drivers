@@ -1153,14 +1153,13 @@ public class IntellivueSimulatorV2 {
         buf.putShort((short) 0); // length placeholder
         int attrStart = buf.position();
 
-        // NOM_ATTR_NU_VAL_OBS (NumericObservedValue) — 12 bytes value
+        // NOM_ATTR_NU_VAL_OBS (NumericObservedValue) — 10 bytes value
+        // Per NumericObservedValue.parse(): physioId(u16) + msmtState(u16) + unitCode(u16) + value(u32)
         buf.putShort((short) NOM_ATTR_NU_VAL_OBS); // attribute_id
-        buf.putShort((short) 12);                   // value length
-        buf.putShort((short) NOM_PART_SCADA);       // physio_id partition
-        buf.putShort((short) n.physioId);            // physio_id code
+        buf.putShort((short) 10);                   // value length
+        buf.putShort((short) n.physioId);            // physio_id (OIDType, u16)
         buf.putShort((short) 0x0000);               // measurement state (valid)
-        buf.putShort((short) NOM_PART_DIM);         // unit_code partition
-        buf.putShort((short) n.unitCode);            // unit_code code
+        buf.putShort((short) n.unitCode);            // unit_code (OIDType, u16)
         buf.putInt(encodeFloat(n.value));            // FLOATType value
 
         int attrEnd = buf.position();
