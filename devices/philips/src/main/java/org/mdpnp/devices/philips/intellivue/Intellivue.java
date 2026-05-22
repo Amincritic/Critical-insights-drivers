@@ -676,6 +676,16 @@ public class Intellivue implements NetworkConnection {
         this.registeredChannel = (DatagramChannel) key.channel();
         this.registeredKey = key;
         this.registeredNetworkLoop = networkLoop;
+
+        // Proactively send association request instead of waiting for Connect Indication.
+        // This allows the driver to work with simulators and direct UDP connections
+        // where no broadcast discovery occurs.
+        try {
+            requestAssociation();
+            log.info("Sent proactive Association Request after registration");
+        } catch (IOException e) {
+            log.warn("Failed to send proactive Association Request: " + e.getMessage());
+        }
     }
 
     @Override
