@@ -348,7 +348,7 @@ public class SimulatorMonitorV2 extends JFrame {
     // =====================================================================
 
     public SimulatorMonitorV2() {
-        super("OpenICE Patient Monitor Simulator V2");
+        super("CriticalInsights Patient Monitor Simulator");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         getContentPane().setBackground(DARK_BG);
         setLayout(new BorderLayout(0, 0));
@@ -418,7 +418,7 @@ public class SimulatorMonitorV2 extends JFrame {
             this.lock = lock;
             this.numTraces = numTraces;
             setBackground(DARK_BG);
-            setPreferredSize(new Dimension(700, 400));
+            setPreferredSize(new Dimension(700, 280));
         }
 
         int getWritePos() {
@@ -522,10 +522,14 @@ public class SimulatorMonitorV2 extends JFrame {
         monitorArea.setBackground(DARK_BG);
         monitorArea.add(drWavePanel, BorderLayout.CENTER);
         monitorArea.add(buildDraegerNumericsPanel(), BorderLayout.EAST);
-        tab.add(monitorArea, BorderLayout.CENTER);
 
-        // Bottom: controls
-        tab.add(buildDraegerControlsArea(), BorderLayout.SOUTH);
+        // Split: waveforms (top) and controls (bottom) — controls get more space
+        JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, monitorArea, buildDraegerControlsArea());
+        split.setBackground(DARK_BG);
+        split.setDividerLocation(300);
+        split.setResizeWeight(0.4);
+        split.setDividerSize(4);
+        tab.add(split, BorderLayout.CENTER);
 
         return tab;
     }
@@ -598,9 +602,10 @@ public class SimulatorMonitorV2 extends JFrame {
         title.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 15));
         title.setBorder(BorderFactory.createEmptyBorder(0, 0, 4, 0));
 
-        // Sliders in a grid
-        JPanel sliders = new JPanel(new GridLayout(4, 2, 12, 2));
+        // Sliders in a grid — 4 rows x 2 columns with spacing
+        JPanel sliders = new JPanel(new GridLayout(4, 2, 16, 6));
         sliders.setBackground(PANEL_BG);
+        sliders.setBorder(BorderFactory.createEmptyBorder(4, 0, 4, 0));
 
         addSliderRow(sliders, "Tidal Vol (mL)",  slTidalVol);
         addSliderRow(sliders, "Resp Rate",       slRespRate);
@@ -644,9 +649,14 @@ public class SimulatorMonitorV2 extends JFrame {
         monitorArea.setBackground(DARK_BG);
         monitorArea.add(phWavePanel, BorderLayout.CENTER);
         monitorArea.add(buildPhilipsNumericsPanel(), BorderLayout.EAST);
-        tab.add(monitorArea, BorderLayout.CENTER);
 
-        tab.add(buildPhilipsControlsArea(), BorderLayout.SOUTH);
+        // Split: waveforms (top) and controls (bottom) — controls get more space
+        JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, monitorArea, buildPhilipsControlsArea());
+        split.setBackground(DARK_BG);
+        split.setDividerLocation(300);
+        split.setResizeWeight(0.4);
+        split.setDividerSize(4);
+        tab.add(split, BorderLayout.CENTER);
 
         return tab;
     }
@@ -717,8 +727,9 @@ public class SimulatorMonitorV2 extends JFrame {
         title.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 15));
         title.setBorder(BorderFactory.createEmptyBorder(0, 0, 4, 0));
 
-        JPanel sliders = new JPanel(new GridLayout(4, 3, 12, 2));
+        JPanel sliders = new JPanel(new GridLayout(4, 3, 16, 6));
         sliders.setBackground(PANEL_BG);
+        sliders.setBorder(BorderFactory.createEmptyBorder(4, 0, 4, 0));
 
         addSliderRow(sliders, "Heart Rate (bpm)", slHeartRate);
         addSliderRow(sliders, "SpO2 (%)",         slSpo2);
