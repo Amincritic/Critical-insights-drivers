@@ -466,107 +466,163 @@ public class IntellivueSimulatorV2 {
     }
 
     private ByteBuffer buildAssociationResponse() {
-        // Full ACSE Association Response per ISO/IEC 8649 / Data Export spec
+        // Build MDSEUserInfoStd payload
         ByteBuffer userInfo = ByteBuffer.allocate(256);
         userInfo.order(ByteOrder.BIG_ENDIAN);
 
-        // ---- User Info: MDSEUserInfoStd ----
+        // MDSEUserInfoStd fields
+        userInfo.putInt((int) 0x80000000L); // protocolVersion = MDDL_VERSION1
+        userInfo.putInt((int) 0x40000000L); // nomenclatureVersion = NOMEN_VERSION
+        userInfo.putInt(0x00000000);        // functionalUnits
+        userInfo.putInt((int) 0x00800000L); // systemType = SYST_SERVER
+        userInfo.putInt((int) 0x20000000L); // startupMode = COLD_START
 
-        // Protocol version
-        userInfo.putInt(0x80000000); // version 1
+        // optionList (AttributeValueList — empty: count=0, length=0)
+        userInfo.putShort((short) 0); // count
+        userInfo.putShort((short) 0); // length
 
-        // Nomenclature version
-        userInfo.putInt(0x40000000);
+        // supportedAProfiles (AttributeValueList with PollProfileSupport + MdibObjectSupport)
+        // Build the two attributes first
+        ByteBuffer attrs = ByteBuffer.allocate(200);
+        attrs.order(ByteOrder.BIG_ENDIAN);
 
-        // Functional units
-        userInfo.putInt(0x00000000);
+        // Attribute 1: PollProfileSupport (attribute_id=0x0001)
+        ByteBuffer pps = ByteBuffer.allocate(64);
+        pps.order(ByteOrder.BIG_ENDIAN);
+        pps.putInt(0x80000000);       // pollProfileRevision
+        pps.putInt(80000);            // minPollPeriod (RelativeTime): 80000 x 125us = 10s
+        pps.putInt(1456);             // maxMtuRx
+        pps.putInt(1456);             // maxMtuTx
+        pps.putInt(0x00000000);       // maxBwTx
+        pps.putInt(0x60000000);       // poll profile options
+        // optionalPackages (AttributeValueList: count=0, length=0)
+        pps.putShort((short) 0);      // count
+        pps.putShort((short) 0);      // length
+        pps.flip();
 
-        // System type
-        userInfo.putInt(0x80000000); // SYST_CLIENT
+        attrs.putShort((short) 0x0001); // attribute_id for PollProfileSupport
+        attrs.putShort((short) pps.remaining()); // length
+        attrs.put(pps);
 
-        // Startup mode
-        userInfo.putInt(0x20000000); // HOT_START
-
-        // ---- PollProfileSupport ----
-        userInfo.putInt(100000);      // minPollPeriod: 100000 x 125us = 12.5 seconds
-        userInfo.putInt(4096);        // maxMtuRx
-        userInfo.putInt(4096);        // maxMtuTx
-        userInfo.putInt(0x00080000);  // maxBwTx (512 kbps)
-        userInfo.putInt(0x60000000);  // poll profile options: P_OPT_DYN_CREATE_OBJECTS | P_OPT_DYN_DELETE_OBJECTS
-        userInfo.putInt(0x00000000);  // optional packages count
-        // No optional packages
-
-        // ---- MdibObjectSupport ----
-        int numObjClasses = 6;
-        userInfo.putShort((short) numObjClasses);
-        userInfo.putShort((short) (numObjClasses * 8)); // each entry is 8 bytes
-
-        // Each MdibObjectSupportEntry: OIDType(2) + reserved(2) + maxInstances(4)
+        // Attribute 2: MdibObjectSupport (attribute_id=0x0102)
+        ByteBuffer mos = ByteBuffer.allocate(100);
+        mos.order(ByteOrder.BIG_ENDIAN);
+        int numClasses = 6;
+        mos.putShort((short) numClasses);
+        mos.putShort((short) (numClasses * 8));
         // MDS
-        userInfo.putShort((short) NOM_MOC_VMS_MDS);
-        userInfo.putShort((short) 0);
-        userInfo.putInt(1);
-        // Numeric Metric
-        userInfo.putShort((short) NOM_MOC_VMO_METRIC_NU);
-        userInfo.putShort((short) 0);
-        userInfo.putInt(64);
-        // Sample Array Real-Time
-        userInfo.putShort((short) NOM_MOC_VMO_METRIC_SA_RT);
-        userInfo.putShort((short) 0);
-        userInfo.putInt(16);
+        mos.putShort((short) NOM_MOC_VMS_MDS); mos.putShort((short) 0); mos.putInt(1);
+        // Numeric
+        mos.putShort((short) NOM_MOC_VMO_METRIC_NU); mos.putShort((short) 0); mos.putInt(64);
+        // SampleArray
+        mos.putShort((short) NOM_MOC_VMO_METRIC_SA_RT); mos.putShort((short) 0); mos.putInt(16);
         // Alarm Monitor
-        userInfo.putShort((short) NOM_MOC_VMO_AL_MON);
-        userInfo.putShort((short) 0);
-        userInfo.putInt(2);
+        mos.putShort((short) NOM_MOC_VMO_AL_MON); mos.putShort((short) 0); mos.putInt(2);
         // Patient Demographics
-        userInfo.putShort((short) NOM_MOC_PT_DEMOG);
-        userInfo.putShort((short) 0);
-        userInfo.putInt(1);
+        mos.putShort((short) NOM_MOC_PT_DEMOG); mos.putShort((short) 0); mos.putInt(1);
         // Enumeration
-        userInfo.putShort((short) NOM_MOC_VMO_METRIC_ENUM);
-        userInfo.putShort((short) 0);
-        userInfo.putInt(16);
+        mos.putShort((short) NOM_MOC_VMO_METRIC_ENUM); mos.putShort((short) 0); mos.putInt(16);
+        mos.flip();
+
+        attrs.putShort((short) 0x0102); // attribute_id for MdibObjectSupport
+        attrs.putShort((short) mos.remaining());
+        attrs.put(mos);
+        attrs.flip();
+
+        // supportedAProfiles: count=2, length=attrs.remaining()
+        userInfo.putShort((short) 2);
+        userInfo.putShort((short) attrs.remaining());
+        userInfo.put(attrs);
 
         userInfo.flip();
         int userInfoLen = userInfo.remaining();
 
-        // ---- Build full response ----
+        // ASN.1 BER length encoding for userInfo (must match ASNLength.java in driver)
+        byte[] asnLen;
+        if (userInfoLen < 128) {
+            asnLen = new byte[] { (byte) userInfoLen };
+        } else if (userInfoLen < 256) {
+            asnLen = new byte[] { (byte) 0x81, (byte) userInfoLen };
+        } else {
+            asnLen = new byte[] { (byte) 0x82, (byte) ((userInfoLen >> 8) & 0xFF), (byte) (userInfoLen & 0xFF) };
+        }
+
+        // Presentation header — exact bytes from AssociationAcceptImpl in driver
+        byte[] presHeader = new byte[] {
+            0x31, (byte)0x80, (byte)0xA0, (byte)0x80, (byte)0x80, 0x01, 0x01, 0x00, 0x00,
+            (byte)0xA2, (byte)0x80, (byte)0xA0, 0x03, 0x00, 0x00, 0x01, (byte)0xA5, (byte)0x80,
+            0x30, (byte)0x80, (byte)0x80, 0x01, 0x00, (byte)0x81, 0x02, 0x51, 0x01, 0x00, 0x00,
+            0x30, (byte)0x80, (byte)0x80, 0x01, 0x00, (byte)0x81, 0x0C, 0x2A, (byte)0x86, 0x48,
+            (byte)0xCE, 0x14, 0x02, 0x01, 0x00, 0x00, 0x00, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00,
+            0x61, (byte)0x80, 0x30, (byte)0x80, 0x02, 0x01, 0x01, (byte)0xA0, (byte)0x80, 0x61,
+            (byte)0x80, (byte)0xA1, (byte)0x80, 0x06, 0x0C, 0x2A, (byte)0x86, 0x48, (byte)0xCE,
+            0x14, 0x02, 0x01, 0x00, 0x00, 0x00, 0x03, 0x01, 0x00, 0x00, (byte)0xA2, 0x03, 0x02,
+            0x01, 0x00, (byte)0xA3, 0x05, (byte)0xA1, 0x03, 0x02, 0x01, 0x00, (byte)0xBE,
+            (byte)0x80, 0x28, (byte)0x80, 0x02, 0x01, 0x02, (byte)0x81
+        };
+
+        // Presentation trailer — 16 zero bytes
+        byte[] presTrailer = new byte[16];
+
+        // Session parameters (PI 0x05 and PI 0x14)
+        byte[] sessionPI = new byte[] {
+            0x05, 0x08, 0x13, 0x01, 0x00, 0x16, 0x01, 0x02, (byte)0x80, 0x00,
+            0x14, 0x02, 0x00, 0x02
+        };
+
+        // Presentation context (0xC1 + length)
+        int presContentLen = presHeader.length + asnLen.length + userInfoLen + presTrailer.length;
+
+        // Total session body length
+        int bodyLen = sessionPI.length + 1 /* 0xC1 tag */ + lengthInfoBytes(presContentLen).length + presContentLen;
+
         ByteBuffer buf = ByteBuffer.allocate(512);
         buf.order(ByteOrder.BIG_ENDIAN);
 
-        // Session header
+        // Session header: type=0x0E (Accept)
         buf.put((byte) AC_SPDU_SI);
-        // Use long form length encoding: 0xC2 + 2 byte length
-        buf.put((byte) 0xC2);
-        int totalLenPos = buf.position();
-        buf.putShort((short) 0); // placeholder
+        // Session length: uses LengthInformation encoding (0xFF + 2 bytes if >= 255)
+        if (bodyLen < 255) {
+            buf.put((byte) bodyLen);
+        } else {
+            buf.put((byte) 0xFF);
+            buf.putShort((short) bodyLen);
+        }
 
-        int bodyStart = buf.position();
+        // Session parameters
+        buf.put(sessionPI);
 
-        // Presentation layer header (simplified from spec)
-        // Presentation context definition result list
-        buf.putShort((short) 0xA1); // context-list tag
-        buf.putShort((short) 0x06); // length
-        buf.put((byte) 0x01);       // context ID
-        buf.put((byte) 0x00);       // result: acceptance
-        buf.putShort((short) 0x0001); // abstract syntax: MDSE
-        buf.putShort((short) 0x0001); // transfer syntax: default
+        // Presentation context: 0xC1 + length (LengthInformation format)
+        buf.put((byte) 0xC1);
+        if (presContentLen < 255) {
+            buf.put((byte) presContentLen);
+        } else {
+            buf.put((byte) 0xFF);
+            buf.putShort((short) presContentLen);
+        }
 
-        // User data tag
-        buf.putShort((short) 0xBE); // user-information tag
-        buf.putShort((short) (userInfoLen + 4)); // length
-        buf.putShort((short) 0x0001); // encoding type
-        buf.putShort((short) userInfoLen); // user info length
+        // Presentation header
+        buf.put(presHeader);
 
-        // Copy user info
+        // ASN.1 length + user info
+        buf.put(asnLen);
         buf.put(userInfo);
 
-        // Fix total length
-        int totalLen = buf.position() - bodyStart;
-        buf.putShort(totalLenPos, (short) totalLen);
+        // Presentation trailer
+        buf.put(presTrailer);
 
         buf.flip();
         return buf;
+    }
+
+    private static byte[] lengthInfoBytes(int len) {
+        if (len < 128) {
+            return new byte[] { (byte) len };
+        } else if (len < 256) {
+            return new byte[] { (byte) 0x81, (byte) len };
+        } else {
+            return new byte[] { (byte) 0x82, (byte) ((len >> 8) & 0xFF), (byte) (len & 0xFF) };
+        }
     }
 
     private void handleReleaseRequest(ByteBuffer in, DatagramSocket socket,
@@ -695,9 +751,9 @@ public class IntellivueSimulatorV2 {
         buf.order(ByteOrder.BIG_ENDIAN);
 
         // Session header
-        buf.put((byte) DATA_EXPORT_SPDU);
+        buf.putShort((short) 0xE100); // sessionId
         int lenPos = buf.position();
-        buf.putShort((short) 0);
+        buf.putShort((short) 0);    // contextId = length placeholder
 
         // ROLRS (linked result)
         buf.putShort((short) ROLRS_APDU);
@@ -763,9 +819,9 @@ public class IntellivueSimulatorV2 {
         buf.order(ByteOrder.BIG_ENDIAN);
 
         // Session header
-        buf.put((byte) DATA_EXPORT_SPDU);
+        buf.putShort((short) 0xE100); // sessionId
         int lenPos = buf.position();
-        buf.putShort((short) 0);
+        buf.putShort((short) 0);    // contextId = length placeholder
 
         // ROLRS
         buf.putShort((short) ROLRS_APDU);
@@ -827,9 +883,9 @@ public class IntellivueSimulatorV2 {
         buf.order(ByteOrder.BIG_ENDIAN);
 
         // Session header
-        buf.put((byte) DATA_EXPORT_SPDU);
+        buf.putShort((short) 0xE100); // sessionId
         int lenPos = buf.position();
-        buf.putShort((short) 0);
+        buf.putShort((short) 0);    // contextId = length placeholder
 
         // RORS (final result)
         buf.putShort((short) RORS_APDU);
@@ -892,9 +948,9 @@ public class IntellivueSimulatorV2 {
         ByteBuffer buf = ByteBuffer.allocate(2048);
         buf.order(ByteOrder.BIG_ENDIAN);
 
-        buf.put((byte) DATA_EXPORT_SPDU);
+        buf.putShort((short) 0xE100); // sessionId
         int lenPos = buf.position();
-        buf.putShort((short) 0);
+        buf.putShort((short) 0);    // contextId = length placeholder
 
         buf.putShort((short) RORS_APDU);
         int roLenPos = buf.position();
@@ -951,9 +1007,9 @@ public class IntellivueSimulatorV2 {
         ByteBuffer buf = ByteBuffer.allocate(512);
         buf.order(ByteOrder.BIG_ENDIAN);
 
-        buf.put((byte) DATA_EXPORT_SPDU);
+        buf.putShort((short) 0xE100); // sessionId
         int lenPos = buf.position();
-        buf.putShort((short) 0);
+        buf.putShort((short) 0);    // contextId = length placeholder
 
         buf.putShort((short) RORS_APDU);
         int roLenPos = buf.position();
@@ -1011,9 +1067,9 @@ public class IntellivueSimulatorV2 {
         ByteBuffer buf = ByteBuffer.allocate(512);
         buf.order(ByteOrder.BIG_ENDIAN);
 
-        buf.put((byte) DATA_EXPORT_SPDU);
+        buf.putShort((short) 0xE100); // sessionId
         int lenPos = buf.position();
-        buf.putShort((short) 0);
+        buf.putShort((short) 0);    // contextId = length placeholder
 
         buf.putShort((short) ROIV_APDU);
         int roLenPos = buf.position();
@@ -1030,31 +1086,22 @@ public class IntellivueSimulatorV2 {
         buf.putShort((short) 0);
 
         // Event time (relative) + event type
-        buf.putInt(0);
-        buf.putShort((short) NOM_NOTI_MDS_CREAT);
+        buf.putInt(0); // relative time
+        buf.putShort((short) NOM_NOTI_MDS_CREAT); // event type
         int eventLenPos = buf.position();
-        buf.putShort((short) 0);
+        buf.putShort((short) 0); // event length placeholder
 
-        // Attribute list
-        int attrCount = 3;
-        buf.putShort((short) attrCount);
+        // Attribute list — minimal: just System Type
+        buf.putShort((short) 1);  // count = 1
         int attrListLenPos = buf.position();
-        buf.putShort((short) 0);
+        buf.putShort((short) 0);  // attr list length placeholder
         int attrStart = buf.position();
 
         // Attribute: System Type
-        buf.putShort((short) NOM_ATTR_SYS_TYPE);
+        buf.putShort((short) NOM_ATTR_SYS_TYPE); // 0x0986
         buf.putShort((short) 4);
         buf.putShort((short) NOM_PART_OBJ);
         buf.putShort((short) NOM_MOC_VMS_MDS);
-
-        // Attribute: System Model
-        writeSystemModelAttribute(buf);
-
-        // Attribute: Absolute Time
-        buf.putShort((short) NOM_ATTR_TIME_ABS);
-        buf.putShort((short) 8);
-        writeAbsoluteTime(buf);
 
         int attrEnd = buf.position();
 
@@ -1078,8 +1125,8 @@ public class IntellivueSimulatorV2 {
         ByteBuffer buf = ByteBuffer.allocate(64);
         buf.order(ByteOrder.BIG_ENDIAN);
 
-        buf.put((byte) DATA_EXPORT_SPDU);
-        buf.putShort((short) 16);
+        buf.putShort((short) 0xE100); // sessionId
+        buf.putShort((short) 16);   // contextId = length
         buf.putShort((short) RORS_APDU);
         buf.putShort((short) 12);
         buf.putShort((short) clientInvokeId);
