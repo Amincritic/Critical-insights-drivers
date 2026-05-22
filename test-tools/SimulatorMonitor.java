@@ -194,9 +194,9 @@ public class SimulatorMonitor extends JFrame {
     private final JSlider slAirwayTemp = makeDarkSlider(28, 40, 34);
 
     // Draeger mode / waveform controls
-    private final JComboBox<String> ventModeCombo = new JComboBox<>(
+    private final JComboBox<String> ventModeCombo = makeDarkCombo(
             new String[]{"IPPV", "SIMV", "CPAP", "ASB", "BIPAP", "PCV", "PSV", "APRV"});
-    private final JCheckBox chkDrWaveforms = new JCheckBox("Enable Waveforms");
+    private final JCheckBox chkDrWaveforms = makeDarkCheck("Enable Waveforms");
 
     // =====================================================================
     // Philips vitals sliders
@@ -231,7 +231,7 @@ public class SimulatorMonitor extends JFrame {
     private final JTextField tfPatientName   = makeDarkField("John Doe", 12);
     private final JTextField tfPatientId     = makeDarkField("P12345", 8);
     private final JTextField tfPatientDob    = makeDarkField("1980-01-15", 10);
-    private final JComboBox<String> cbPatientSex = new JComboBox<>(new String[]{"M", "F", "Unknown"});
+    private final JComboBox<String> cbPatientSex = makeDarkCombo(new String[]{"M", "F", "Unknown"});
     private final JTextField tfPatientHeight = makeDarkField("175", 4);
     private final JTextField tfPatientWeight = makeDarkField("75", 4);
 
@@ -252,10 +252,10 @@ public class SimulatorMonitor extends JFrame {
     private final JLabel draegerConnStatus = new JLabel("No connection");
     private final JLabel philipsConnStatus = new JLabel("No connection");
 
-    private final JButton btnDraegerStart = new JButton("Start");
-    private final JButton btnDraegerStop  = new JButton("Stop");
-    private final JButton btnPhilipsStart = new JButton("Start");
-    private final JButton btnPhilipsStop  = new JButton("Stop");
+    private final JButton btnDraegerStart = makeDarkButton("Start");
+    private final JButton btnDraegerStop  = makeDarkButton("Stop");
+    private final JButton btnPhilipsStart = makeDarkButton("Start");
+    private final JButton btnPhilipsStop  = makeDarkButton("Stop");
 
     // =====================================================================
     // Log
@@ -667,9 +667,12 @@ public class SimulatorMonitor extends JFrame {
         c.gridx = 3; bar.add(modelCombo, c);
         c.gridx = 4; bar.add(btnDraegerStart, c);
         c.gridx = 5; bar.add(btnDraegerStop, c);
+        modelCombo.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 13));
         draegerStatus.setForeground(Color.GRAY);
+        draegerStatus.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
         c.gridx = 6; bar.add(draegerStatus, c);
         draegerConnStatus.setForeground(new Color(100, 100, 100));
+        draegerConnStatus.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
         c.gridx = 7; bar.add(draegerConnStatus, c);
 
         // Philips row
@@ -681,8 +684,10 @@ public class SimulatorMonitor extends JFrame {
         c.gridx = 4; bar.add(btnPhilipsStart, c);
         c.gridx = 5; bar.add(btnPhilipsStop, c);
         philipsStatus.setForeground(Color.GRAY);
+        philipsStatus.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
         c.gridx = 6; bar.add(philipsStatus, c);
         philipsConnStatus.setForeground(new Color(100, 100, 100));
+        philipsConnStatus.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
         c.gridx = 7; bar.add(philipsConnStatus, c);
 
         return bar;
@@ -789,7 +794,8 @@ public class SimulatorMonitor extends JFrame {
         JTabbedPane tabs = new JTabbedPane();
         tabs.setBackground(new Color(30, 30, 30));
         tabs.setForeground(Color.LIGHT_GRAY);
-        tabs.setPreferredSize(new Dimension(0, 200));
+        tabs.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 14));
+        tabs.setPreferredSize(new Dimension(0, 220));
 
         tabs.addTab("Draeger Controls", buildDraegerControlsTab());
         tabs.addTab("Philips Controls", buildPhilipsControlsTab());
@@ -908,7 +914,7 @@ public class SimulatorMonitor extends JFrame {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBackground(new Color(25, 25, 25));
         logArea.setEditable(false);
-        logArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 11));
+        logArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 13));
         logArea.setBackground(new Color(15, 15, 15));
         logArea.setForeground(new Color(0, 200, 0));
         logArea.setCaretColor(new Color(0, 200, 0));
@@ -933,7 +939,20 @@ public class SimulatorMonitor extends JFrame {
     private static JLabel darkLabel(String text) {
         JLabel l = new JLabel(text);
         l.setForeground(Color.LIGHT_GRAY);
+        l.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
         return l;
+    }
+
+    private static JButton makeDarkButton(String text) {
+        JButton b = new JButton(text);
+        b.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
+        return b;
+    }
+
+    private static JComboBox<String> makeDarkCombo(String[] items) {
+        JComboBox<String> cb = new JComboBox<>(items);
+        cb.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 13));
+        return cb;
     }
 
     private static JSlider makeDarkSlider(int min, int max, int value) {
@@ -948,6 +967,7 @@ public class SimulatorMonitor extends JFrame {
         JCheckBox cb = new JCheckBox(text);
         cb.setForeground(Color.LIGHT_GRAY);
         cb.setBackground(new Color(25, 25, 25));
+        cb.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
         return cb;
     }
 
@@ -956,6 +976,7 @@ public class SimulatorMonitor extends JFrame {
         tf.setBackground(new Color(40, 40, 40));
         tf.setForeground(Color.WHITE);
         tf.setCaretColor(Color.WHITE);
+        tf.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 13));
         return tf;
     }
 
@@ -963,12 +984,12 @@ public class SimulatorMonitor extends JFrame {
         JPanel row = new JPanel(new BorderLayout(3, 0));
         row.setBackground(new Color(25, 25, 25));
         JLabel lbl = darkLabel(label);
-        lbl.setPreferredSize(new Dimension(80, 18));
-        lbl.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 11));
+        lbl.setPreferredSize(new Dimension(100, 22));
+        lbl.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
         JLabel val = new JLabel(String.valueOf(slider.getValue()));
         val.setForeground(new Color(0, 220, 0));
-        val.setFont(new Font(Font.MONOSPACED, Font.BOLD, 12));
-        val.setPreferredSize(new Dimension(40, 18));
+        val.setFont(new Font(Font.MONOSPACED, Font.BOLD, 14));
+        val.setPreferredSize(new Dimension(45, 22));
         slider.addChangeListener(e -> val.setText(String.valueOf(slider.getValue())));
         row.add(lbl, BorderLayout.WEST);
         row.add(slider, BorderLayout.CENTER);
