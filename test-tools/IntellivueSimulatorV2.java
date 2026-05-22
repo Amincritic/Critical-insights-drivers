@@ -1144,50 +1144,24 @@ public class IntellivueSimulatorV2 {
     // =====================================================================
 
     private void writeNumericObservation(ByteBuffer buf, Numeric n) {
-        // Handle
+        // Per ObservationPollImpl.parse(): handle(u16) + AttributeList(count+length+AVAs)
         buf.putShort((short) n.handle);
 
-        // Attribute list: NOM_ATTR_NU_VAL_OBS, NOM_ATTR_ID_LABEL, NOM_ATTR_ID_LABEL_STRING, NOM_ATTR_METRIC_SPECN
-        int attrCount = 4;
-        buf.putShort((short) attrCount);
+        // Attribute list: just NOM_ATTR_NU_VAL_OBS for reliability
+        buf.putShort((short) 1); // count = 1 attribute
         int attrListLenPos = buf.position();
-        buf.putShort((short) 0);
+        buf.putShort((short) 0); // length placeholder
         int attrStart = buf.position();
 
-        // ---- Attribute 1: NOM_ATTR_NU_VAL_OBS (NumericObservedValue) ----
-        buf.putShort((short) NOM_ATTR_NU_VAL_OBS);
-        buf.putShort((short) 12);
-        // physio_id TYPE: partition + code
-        buf.putShort((short) NOM_PART_SCADA);
-        buf.putShort((short) n.physioId);
-        // measurement state
-        buf.putShort((short) 0x0000); // valid measurement
-        // unit_code TYPE: partition + code
-        buf.putShort((short) NOM_PART_DIM);
-        buf.putShort((short) n.unitCode);
-        // value (FLOATType)
-        buf.putInt(encodeFloat(n.value));
-
-        // ---- Attribute 2: NOM_ATTR_ID_LABEL (TextId) ----
-        buf.putShort((short) NOM_ATTR_ID_LABEL);
-        buf.putShort((short) 4);
-        buf.putInt(n.physioId); // TextId maps to physio ID
-
-        // ---- Attribute 3: NOM_ATTR_ID_LABEL_STRING (human-readable label) ----
-        byte[] labelBytes = n.label.getBytes();
-        int labelPadded = (labelBytes.length + 1) & ~1; // pad to even
-        buf.putShort((short) NOM_ATTR_ID_LABEL_STRING);
-        buf.putShort((short) (2 + labelPadded)); // VariableLabel: length(2) + string
-        buf.putShort((short) labelBytes.length);
-        buf.put(labelBytes);
-        if (labelBytes.length % 2 != 0) buf.put((byte) 0); // pad
-
-        // ---- Attribute 4: NOM_ATTR_METRIC_SPECN (MetricSpecification) ----
-        buf.putShort((short) NOM_ATTR_METRIC_SPECN);
-        buf.putShort((short) 8);
-        buf.putInt(n.updatePeriod); // update period in 1/8ms (e.g. 8000 = 1 second)
-        buf.putShort((short) METRIC_CAT_MEAS); // category: measurement
-        buf.putShort((short) (METRIC_ACCESS_AVAIL | METRIC_ACCESS_RD_ONLY)); // access + relevance
+        // NOM_ATTR_NU_VAL_OBS (NumericObservedValue) — 12 bytes value
+        buf.putShort((short) NOM_ATTR_NU_VAL_OBS); // attribute_id
+        buf.putShort((short) 12);                   // value length
+        buf.putShort((short) NOM_PART_SCADA);       // physio_id partition
+        buf.putShort((short) n.physioId);            // physio_id code
+        buf.putShort((short) 0x0000);               // measurement state (valid)
+        buf.putShort((short) NOM_PART_DIM);         // unit_code partition
+        buf.putShort((short) n.unitCode);            // unit_code code
+        buf.putInt(encodeFloat(n.value));            // FLOATType value
 
         int attrEnd = buf.position();
         buf.putShort(attrListLenPos, (short) (attrEnd - attrStart));
@@ -1707,12 +1681,15 @@ public class IntellivueSimulatorV2 {
     // =====================================================================
 
     private void writePollHeader(ByteBuffer buf) {
-        // Poll number
+        // Per SinglePollDataResultImpl.parse():
+        // pollNumber(u16) + relativeTime(u32) + absoluteTime(8 BCD) +
+        // polledObjectType(Type: partition(u16)+code(u16)) + polledAttrGroup(u16)
         buf.putShort((short) pollNumber);
-        // Relative time (1/8ms since start)
-        buf.putInt((int) ((System.currentTimeMillis() & 0xFFFFFFFFL) * 8));
-        // Absolute time (BCD encoded)
-        writeAbsoluteTime(buf);
+        buf.putInt((int) ((System.currentTimeMillis() & 0xFFFFFFFFL) * 8)); // relativeTime
+        writeAbsoluteTime(buf); // 8 bytes BCD
+        buf.putShort((short) NOM_PART_OBJ);         // polledObjectType.partition
+        buf.putShort((short) NOM_MOC_VMO_METRIC_NU); // polledObjectType.code
+        buf.putShort((short) 0x0000);                // polledAttrGroup = all
     }
 
     // =====================================================================
