@@ -44,6 +44,8 @@ sudo journalctl -u openice-multidevice -f
 | `./run.sh --auto --stdout` | Auto-detect devices on COM ports and run |
 | `./run.sh --help` | Shows all run options with examples |
 | `./run.sh [options]` | Runs the gateway with real devices (see `--help` for modes) |
+| `java -cp test-tools MedibusSimulator --tcp 9100` | Spec-compliant Draeger MEDIBUS simulator |
+| `java -cp test-tools IntellivueSimulator` | Spec-compliant Philips IntelliVue simulator |
 | `./hil-test.sh` | HIL test: virtual serial ports with socat + fake devices (requires `socat`) |
 | `./hil-test.sh --duration 120` | HIL test for 120 seconds |
 | `sudo bash deploy/deploy.sh` | Production deployment: creates user, installs service, logrotate |
@@ -715,82 +717,116 @@ If a Draeger unit cannot be inferred safely, `unit` and `unitCode` are `null`.
 
 ## Testing without devices
 
-A fake Draeger MEDIBUS device simulator is included in `test-tools/`. It responds to MEDIBUS poll commands with synthetic vital signs (tidal volume, respiratory rate, airway pressure, FiO2, PEEP, compliance, resistance) that vary over time.
+Spec-compliant device simulators are included in `test-tools/`. They produce realistic vital signs that the drivers decode as if talking to real hardware.
 
-### Compile the simulator
-
-```bash
-javac test-tools/FakeDraegerDevice.java
-```
-
-### Run in two terminals
-
-**Terminal 1** — start the fake device on TCP port 9100:
+### Compile simulators
 
 ```bash
-java -cp test-tools FakeDraegerDevice 9100
+javac test-tools/MedibusSimulator.java
+javac test-tools/IntellivueSimulator.java
 ```
 
-You should see:
+### Draeger MEDIBUS simulator
 
-```
-FakeDraegerDevice listening on port 9100
-Waiting for gateway connection...
-```
+Follows the Dräger RS 232 MEDIBUS Protocol Definition (Rev 6.00). Supports ICC handshake, proper ASCII HEX checksums, measured data, alarms, device settings, text messages, and multiple device models.
 
-**Terminal 2** — connect the gateway:
+**Terminal 1** — start simulator:
 
 ```bash
-devices/draeger/build/install/draeger/bin/draeger \
-  --tcp-host 127.0.0.1 --tcp-port 9100 \
-  --gateway-id test_gw --bed-id test_bed \
-  --device-id test_draeger --stdout true
+java -cp test-tools MedibusSimulator --tcp 9100
 ```
 
-### Expected output
+**Terminal 2** — connect gateway:
 
-The gateway will print JSON events every second:
-
-```json
-{"gatewayId":"test_gw","bedId":"test_bed","deviceId":"test_draeger","vendor":"draeger","protocol":"medibus","eventType":"vital","metric":"BreathingPressure_(in_mbar)","unit":"cmH2O","rawValue":"  23","value":23}
+```bash
+./run.sh --draeger-tcp 127.0.0.1:9100 --stdout
 ```
 
-The fake device terminal will log each command it receives:
+**Choose a device model:**
+
+```bash
+java -cp test-tools MedibusSimulator --tcp 9100 --model evita     # Evita (default)
+java -cp test-tools MedibusSimulator --tcp 9100 --model evita4    # Evita 4
+java -cp test-tools MedibusSimulator --tcp 9100 --model v500      # Evita V500
+java -cp test-tools MedibusSimulator --tcp 9100 --model savina    # Savina
+java -cp test-tools MedibusSimulator --tcp 9100 --model fabius    # Fabius GS
+```
+
+**Simulator output:**
 
 ```
+MedibusSimulator [Evita] listening on TCP port 9100
 Gateway connected from /127.0.0.1:54321
-  Received command: 0x52 (ReqDeviceId) [cycle 1]
-    -> Device ID: Evita V500  SN:FAKE001  SW:03.20n
-  Received command: 0x44 (ReqDateTime) [cycle 2]
-    -> DateTime: 210526143000
-  Received command: 0x24 (ReqMeasuredCP1) [cycle 3]
-    -> CP1: VT=450mL RR=16 Paw=22cmH2O FiO2=40%
+  [1] ICC (0x51)
+       -> ICC acknowledged, communication initialized
+  [2] ReqDeviceId (0x52)
+       -> ID=8210 Name='Evita' Rev=01.00:03.00
+  [3] ReqDataCP1 (0x24)
+       -> VT=460mL RR=16 Paw=21 PEEP=5 FiO2=40%
 ```
 
-### Testing with JSONL output
+**Simulated vitals:** tidal volume, respiratory rate, minute volume, peak/mean/plateau pressure, PEEP, compliance, resistance, FiO2, airway temperature, spontaneous respiratory rate.
+
+### Philips IntelliVue simulator
+
+Follows the Philips IntelliVue Data Export Interface Programming Guide (Rev G.0). Supports association handshake, MDS Create Event, poll results with FLOAT-Type numerics, and proper big-endian encoding.
+
+**Terminal 1** — start simulator:
 
 ```bash
-devices/draeger/build/install/draeger/bin/draeger \
-  --tcp-host 127.0.0.1 --tcp-port 9100 \
-  --gateway-id test_gw --bed-id test_bed \
-  --device-id test_draeger \
-  --jsonl /tmp/test-draeger.jsonl --stdout true
+java -cp test-tools IntellivueSimulator --port 24105
 ```
 
-Then inspect the file:
+**Terminal 2** — connect gateway:
 
 ```bash
-tail -f /tmp/test-draeger.jsonl
-wc -l /tmp/test-draeger.jsonl   # count events received
+./run.sh --philips-host 127.0.0.1 --stdout
 ```
 
-### Custom port
+**Simulator output:**
+
+```
+IntellivueSimulator listening on UDP port 24105
+  <- Association Request from /127.0.0.1:24105
+  -> Association Response (accepted)
+  -> MDS Create Event
+  <- Poll Request #1 (extended)
+  -> Poll Result: HR=72 SpO2=97 RR=16 ABP=120/80 etCO2=38
+```
+
+**Simulated vitals:** heart rate, SpO2, pulse rate, respiratory rate, ABP (sys/dia/mean), NBP (sys/dia/mean), end-tidal CO2, blood temperature.
+
+### Both simulators together
 
 ```bash
-java -cp test-tools FakeDraegerDevice 9200
+# Terminal 1 — Draeger simulator
+java -cp test-tools MedibusSimulator --tcp 9100
+
+# Terminal 2 — Philips simulator
+java -cp test-tools IntellivueSimulator --port 24105
+
+# Terminal 3 — gateway receives data from both
+devices/multidevice/build/install/multidevice/bin/multidevice \
+  --gateway-id test --bed-id test \
+  --philips-host 127.0.0.1 --philips-device-id sim_philips \
+  --draeger-serial NONE \
+  --stdout true
 ```
 
-Then use `--tcp-port 9200` in the gateway command.
+### Save simulator output to file
+
+```bash
+./run.sh --draeger-tcp 127.0.0.1:9100 --jsonl /tmp/draeger-sim.jsonl --stdout
+```
+
+### Quick test (automated)
+
+The `test.sh` script runs the basic Draeger simulator and gateway together automatically:
+
+```bash
+./test.sh              # 30 seconds
+./test.sh 9100 60      # 60 seconds on port 9100
+```
 
 ---
 
