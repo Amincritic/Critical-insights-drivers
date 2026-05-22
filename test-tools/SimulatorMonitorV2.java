@@ -418,6 +418,7 @@ public class SimulatorMonitorV2 extends JFrame {
             this.lock = lock;
             this.numTraces = numTraces;
             setBackground(DARK_BG);
+            setMinimumSize(new Dimension(300, 100));
             setPreferredSize(new Dimension(700, 280));
         }
 
@@ -517,19 +518,24 @@ public class SimulatorMonitorV2 extends JFrame {
         // Connection bar at top
         tab.add(buildDraegerConnectionBar(), BorderLayout.NORTH);
 
-        // Center: waveforms + numerics
-        JPanel monitorArea = new JPanel(new BorderLayout(0, 0));
-        monitorArea.setBackground(DARK_BG);
-        monitorArea.add(drWavePanel, BorderLayout.CENTER);
-        monitorArea.add(buildDraegerNumericsPanel(), BorderLayout.EAST);
+        // Horizontal split: waveforms (left) | numerics (right) — resizable
+        JSplitPane hSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, drWavePanel, buildDraegerNumericsPanel());
+        hSplit.setBackground(DARK_BG);
+        hSplit.setDividerLocation(800);
+        hSplit.setResizeWeight(0.75);
+        hSplit.setDividerSize(5);
+        hSplit.setContinuousLayout(true);
 
-        // Split: waveforms (top) and controls (bottom) — controls get more space
-        JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, monitorArea, buildDraegerControlsArea());
-        split.setBackground(DARK_BG);
-        split.setDividerLocation(300);
-        split.setResizeWeight(0.4);
-        split.setDividerSize(4);
-        tab.add(split, BorderLayout.CENTER);
+        // Vertical split: monitor area (top) | controls (bottom) — resizable
+        JPanel controlsArea = buildDraegerControlsArea();
+        JSplitPane vSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT, hSplit, controlsArea);
+        vSplit.setBackground(DARK_BG);
+        vSplit.setDividerLocation(300);
+        vSplit.setResizeWeight(0.4);
+        vSplit.setDividerSize(5);
+        vSplit.setContinuousLayout(true);
+
+        tab.add(vSplit, BorderLayout.CENTER);
 
         return tab;
     }
@@ -562,7 +568,8 @@ public class SimulatorMonitorV2 extends JFrame {
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBackground(DARK_BG);
-        panel.setPreferredSize(new Dimension(260, 0));
+        panel.setMinimumSize(new Dimension(180, 0));
+        panel.setPreferredSize(new Dimension(280, 0));
         panel.setBorder(BorderFactory.createMatteBorder(0, 2, 0, 0, new Color(60, 60, 60)));
 
         Color yellow  = DR_TRACE_COLORS[0];
@@ -645,18 +652,24 @@ public class SimulatorMonitorV2 extends JFrame {
 
         tab.add(buildPhilipsConnectionBar(), BorderLayout.NORTH);
 
-        JPanel monitorArea = new JPanel(new BorderLayout(0, 0));
-        monitorArea.setBackground(DARK_BG);
-        monitorArea.add(phWavePanel, BorderLayout.CENTER);
-        monitorArea.add(buildPhilipsNumericsPanel(), BorderLayout.EAST);
+        // Horizontal split: waveforms (left) | numerics (right) — resizable
+        JSplitPane hSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, phWavePanel, buildPhilipsNumericsPanel());
+        hSplit.setBackground(DARK_BG);
+        hSplit.setDividerLocation(800);
+        hSplit.setResizeWeight(0.7);
+        hSplit.setDividerSize(5);
+        hSplit.setContinuousLayout(true);
 
-        // Split: waveforms (top) and controls (bottom) — controls get more space
-        JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, monitorArea, buildPhilipsControlsArea());
-        split.setBackground(DARK_BG);
-        split.setDividerLocation(300);
-        split.setResizeWeight(0.4);
-        split.setDividerSize(4);
-        tab.add(split, BorderLayout.CENTER);
+        // Vertical split: monitor area (top) | controls (bottom) — resizable
+        JPanel controlsArea = buildPhilipsControlsArea();
+        JSplitPane vSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT, hSplit, controlsArea);
+        vSplit.setBackground(DARK_BG);
+        vSplit.setDividerLocation(300);
+        vSplit.setResizeWeight(0.4);
+        vSplit.setDividerSize(5);
+        vSplit.setContinuousLayout(true);
+
+        tab.add(vSplit, BorderLayout.CENTER);
 
         return tab;
     }
@@ -688,7 +701,8 @@ public class SimulatorMonitorV2 extends JFrame {
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBackground(DARK_BG);
-        panel.setPreferredSize(new Dimension(280, 0));
+        panel.setMinimumSize(new Dimension(180, 0));
+        panel.setPreferredSize(new Dimension(300, 0));
         panel.setBorder(BorderFactory.createMatteBorder(0, 2, 0, 0, new Color(60, 60, 60)));
 
         Color green  = PH_TRACE_COLORS[0];
