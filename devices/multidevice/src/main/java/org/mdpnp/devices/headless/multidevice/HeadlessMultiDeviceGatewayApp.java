@@ -323,7 +323,7 @@ public final class HeadlessMultiDeviceGatewayApp {
         String philipsHost;
         String philipsSerial;
         int philipsPort = Intellivue.DEFAULT_UNICAST_PORT;
-        int philipsLocalPort = Intellivue.DEFAULT_UNICAST_PORT;
+        int philipsLocalPort = 0; // ephemeral port — avoids conflict when simulator uses 24105
         String philipsDeviceId = "philips_monitor_01";
 
         String draegerSerial;

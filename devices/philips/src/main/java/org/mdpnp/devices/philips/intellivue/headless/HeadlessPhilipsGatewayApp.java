@@ -78,7 +78,7 @@ public final class HeadlessPhilipsGatewayApp {
     static final class Args {
         String host;
         int port = Intellivue.DEFAULT_UNICAST_PORT;
-        int localPort = Intellivue.DEFAULT_UNICAST_PORT;
+        int localPort = 0; // ephemeral port — avoids conflict when simulator uses 24105
         String gatewayId = "jetson_nicu_01";
         String bedId = "bed_01";
         String deviceId = "philips_monitor_01";
