@@ -93,7 +93,8 @@ public class CriticalInsightsMonitor extends JFrame {
     static final int NOM_MOC_VMO_AL_MON       = 0x0002;
     static final int NOM_MOC_PT_DEMOG         = 0x0029;
     static final int NOM_MOC_VMO_METRIC_ENUM  = 0x000A;
-    static final int NOM_ACT_POLL_MDIB_DATA_EXT = 0x0C17;
+    static final int NOM_ACT_POLL_MDIB_DATA     = 0x0C16; // 3094
+    static final int NOM_ACT_POLL_MDIB_DATA_EXT = 0xF13B; // 61755
     static final int NOM_NOTI_MDS_CREAT  = 0x0D06;
 
     static final int NOM_ATTR_NU_VAL_OBS         = 0x0950;
@@ -2904,8 +2905,9 @@ public class CriticalInsightsMonitor extends JFrame {
 
                     } else if (first == DATA_EXPORT_SPDU && phAssociated) {
                         in.position(0);
-                        in.get();
-                        in.getShort();
+                        // 4-byte SPpdu header: session_id(u16) + p_context_id(u16)
+                        int sessionId = in.getShort() & 0xFFFF;  // 0xE100
+                        int pContextId = in.getShort() & 0xFFFF; // 2
                         int roType = in.getShort() & 0xFFFF;
 
                         if (roType == ROIV_APDU) {
@@ -2996,69 +2998,171 @@ public class CriticalInsightsMonitor extends JFrame {
     }
 
     private void sendPhilipsAssocResponse(DatagramSocket socket, InetSocketAddress addr) throws IOException {
+        // Build MDSEUserInfoStd payload (matches IntellivueSimulatorV2.buildAssociationResponse)
         ByteBuffer userInfo = ByteBuffer.allocate(256);
         userInfo.order(ByteOrder.BIG_ENDIAN);
-        userInfo.putInt(0x80000000);
-        userInfo.putInt(0x40000000);
-        userInfo.putInt(0x00000000);
-        userInfo.putInt(0x80000000);
-        userInfo.putInt(0x20000000);
 
-        userInfo.putInt(100000);
-        userInfo.putInt(4096);
-        userInfo.putInt(4096);
-        userInfo.putInt(0x00080000);
-        userInfo.putInt(0x60000000);
-        userInfo.putInt(0x00000000);
+        // MDSEUserInfoStd fields
+        userInfo.putInt((int) 0x80000000L); // protocolVersion = MDDL_VERSION1
+        userInfo.putInt((int) 0x40000000L); // nomenclatureVersion = NOMEN_VERSION
+        userInfo.putInt(0x00000000);        // functionalUnits
+        userInfo.putInt((int) 0x00800000L); // systemType = SYST_SERVER
+        userInfo.putInt((int) 0x20000000L); // startupMode = COLD_START
 
+        // optionList (AttributeValueList — empty: count=0, length=0)
+        userInfo.putShort((short) 0); // count
+        userInfo.putShort((short) 0); // length
+
+        // supportedAProfiles (AttributeValueList with PollProfileSupport + MdibObjectSupport)
+        ByteBuffer attrs = ByteBuffer.allocate(200);
+        attrs.order(ByteOrder.BIG_ENDIAN);
+
+        // Attribute 1: PollProfileSupport (attribute_id=0x0001)
+        ByteBuffer pps = ByteBuffer.allocate(64);
+        pps.order(ByteOrder.BIG_ENDIAN);
+        pps.putInt(0x80000000);       // pollProfileRevision
+        pps.putInt(80000);            // minPollPeriod (RelativeTime): 80000 x 125us = 10s
+        pps.putInt(1456);             // maxMtuRx
+        pps.putInt(1456);             // maxMtuTx
+        pps.putInt(0x00000000);       // maxBwTx
+        pps.putInt(0x60000000);       // poll profile options
+        // optionalPackages (AttributeValueList: count=0, length=0)
+        pps.putShort((short) 0);      // count
+        pps.putShort((short) 0);      // length
+        pps.flip();
+
+        attrs.putShort((short) 0x0001); // attribute_id for PollProfileSupport
+        attrs.putShort((short) pps.remaining()); // length
+        attrs.put(pps);
+
+        // Attribute 2: MdibObjectSupport (attribute_id=0x0102)
+        ByteBuffer mos = ByteBuffer.allocate(100);
+        mos.order(ByteOrder.BIG_ENDIAN);
         int numObjClasses = 6;
-        userInfo.putShort((short) numObjClasses);
-        userInfo.putShort((short) (numObjClasses * 8));
-        int[][] objClasses = {
-            {NOM_MOC_VMS_MDS, 1}, {NOM_MOC_VMO_METRIC_NU, 64},
-            {NOM_MOC_VMO_METRIC_SA_RT, 16}, {NOM_MOC_VMO_AL_MON, 2},
-            {NOM_MOC_PT_DEMOG, 1}, {NOM_MOC_VMO_METRIC_ENUM, 16}
-        };
-        for (int[] oc : objClasses) {
-            userInfo.putShort((short) oc[0]);
-            userInfo.putShort((short) 0);
-            userInfo.putInt(oc[1]);
-        }
+        mos.putShort((short) numObjClasses);
+        mos.putShort((short) (numObjClasses * 8));
+        // MDS
+        mos.putShort((short) NOM_MOC_VMS_MDS); mos.putShort((short) 0); mos.putInt(1);
+        // Numeric
+        mos.putShort((short) NOM_MOC_VMO_METRIC_NU); mos.putShort((short) 0); mos.putInt(64);
+        // SampleArray
+        mos.putShort((short) NOM_MOC_VMO_METRIC_SA_RT); mos.putShort((short) 0); mos.putInt(16);
+        // Alarm Monitor
+        mos.putShort((short) NOM_MOC_VMO_AL_MON); mos.putShort((short) 0); mos.putInt(2);
+        // Patient Demographics
+        mos.putShort((short) NOM_MOC_PT_DEMOG); mos.putShort((short) 0); mos.putInt(1);
+        // Enumeration
+        mos.putShort((short) NOM_MOC_VMO_METRIC_ENUM); mos.putShort((short) 0); mos.putInt(16);
+        mos.flip();
+
+        attrs.putShort((short) 0x0102); // attribute_id for MdibObjectSupport
+        attrs.putShort((short) mos.remaining());
+        attrs.put(mos);
+        attrs.flip();
+
+        // supportedAProfiles: count=2, length=attrs.remaining()
+        userInfo.putShort((short) 2);
+        userInfo.putShort((short) attrs.remaining());
+        userInfo.put(attrs);
+
         userInfo.flip();
         int userInfoLen = userInfo.remaining();
 
+        // ASN.1 BER length encoding for userInfo
+        byte[] asnLen;
+        if (userInfoLen < 128) {
+            asnLen = new byte[] { (byte) userInfoLen };
+        } else if (userInfoLen < 256) {
+            asnLen = new byte[] { (byte) 0x81, (byte) userInfoLen };
+        } else {
+            asnLen = new byte[] { (byte) 0x82, (byte) ((userInfoLen >> 8) & 0xFF), (byte) (userInfoLen & 0xFF) };
+        }
+
+        // Presentation header — exact bytes from AssociationAcceptImpl in driver
+        byte[] presHeader = new byte[] {
+            0x31, (byte)0x80, (byte)0xA0, (byte)0x80, (byte)0x80, 0x01, 0x01, 0x00, 0x00,
+            (byte)0xA2, (byte)0x80, (byte)0xA0, 0x03, 0x00, 0x00, 0x01, (byte)0xA5, (byte)0x80,
+            0x30, (byte)0x80, (byte)0x80, 0x01, 0x00, (byte)0x81, 0x02, 0x51, 0x01, 0x00, 0x00,
+            0x30, (byte)0x80, (byte)0x80, 0x01, 0x00, (byte)0x81, 0x0C, 0x2A, (byte)0x86, 0x48,
+            (byte)0xCE, 0x14, 0x02, 0x01, 0x00, 0x00, 0x00, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00,
+            0x61, (byte)0x80, 0x30, (byte)0x80, 0x02, 0x01, 0x01, (byte)0xA0, (byte)0x80, 0x61,
+            (byte)0x80, (byte)0xA1, (byte)0x80, 0x06, 0x0C, 0x2A, (byte)0x86, 0x48, (byte)0xCE,
+            0x14, 0x02, 0x01, 0x00, 0x00, 0x00, 0x03, 0x01, 0x00, 0x00, (byte)0xA2, 0x03, 0x02,
+            0x01, 0x00, (byte)0xA3, 0x05, (byte)0xA1, 0x03, 0x02, 0x01, 0x00, (byte)0xBE,
+            (byte)0x80, 0x28, (byte)0x80, 0x02, 0x01, 0x02, (byte)0x81
+        };
+
+        // Presentation trailer — 16 zero bytes
+        byte[] presTrailer = new byte[16];
+
+        // Session parameters (PI 0x05 and PI 0x14)
+        byte[] sessionPI = new byte[] {
+            0x05, 0x08, 0x13, 0x01, 0x00, 0x16, 0x01, 0x02, (byte)0x80, 0x00,
+            0x14, 0x02, 0x00, 0x02
+        };
+
+        // Presentation context (0xC1 + length)
+        int presContentLen = presHeader.length + asnLen.length + userInfoLen + presTrailer.length;
+
+        // Total session body length
+        int bodyLen = sessionPI.length + 1 /* 0xC1 tag */ + phLengthInfoBytes(presContentLen).length + presContentLen;
+
         ByteBuffer buf = ByteBuffer.allocate(512);
         buf.order(ByteOrder.BIG_ENDIAN);
+
+        // Session header: type=0x0E (Accept)
         buf.put((byte) AC_SPDU_SI);
-        buf.put((byte) 0xC2);
-        int totalLenPos = buf.position();
-        buf.putShort((short) 0);
-        int bodyStart = buf.position();
+        // Session length: uses LengthInformation encoding (0xFF + 2 bytes if >= 255)
+        if (bodyLen < 255) {
+            buf.put((byte) bodyLen);
+        } else {
+            buf.put((byte) 0xFF);
+            buf.putShort((short) bodyLen);
+        }
 
-        buf.putShort((short) 0xA1); buf.putShort((short) 0x06);
-        buf.put((byte) 0x01); buf.put((byte) 0x00);
-        buf.putShort((short) 0x0001); buf.putShort((short) 0x0001);
+        // Session parameters
+        buf.put(sessionPI);
 
-        buf.putShort((short) 0xBE);
-        buf.putShort((short) (userInfoLen + 4));
-        buf.putShort((short) 0x0001);
-        buf.putShort((short) userInfoLen);
+        // Presentation context: 0xC1 + length (LengthInformation format)
+        buf.put((byte) 0xC1);
+        if (presContentLen < 255) {
+            buf.put((byte) presContentLen);
+        } else {
+            buf.put((byte) 0xFF);
+            buf.putShort((short) presContentLen);
+        }
+
+        // Presentation header
+        buf.put(presHeader);
+
+        // ASN.1 length + user info
+        buf.put(asnLen);
         buf.put(userInfo);
 
-        int totalLen = buf.position() - bodyStart;
-        buf.putShort(totalLenPos, (short) totalLen);
+        // Presentation trailer
+        buf.put(presTrailer);
 
         buf.flip();
         sendUdp(socket, addr, buf);
+    }
+
+    private static byte[] phLengthInfoBytes(int len) {
+        if (len < 128) {
+            return new byte[] { (byte) len };
+        } else if (len < 256) {
+            return new byte[] { (byte) 0x81, (byte) len };
+        } else {
+            return new byte[] { (byte) 0x82, (byte) ((len >> 8) & 0xFF), (byte) (len & 0xFF) };
+        }
     }
 
     private void sendPhilipsMdsEvent(DatagramSocket socket, InetSocketAddress addr) throws IOException {
         ByteBuffer buf = ByteBuffer.allocate(512);
         buf.order(ByteOrder.BIG_ENDIAN);
 
-        buf.put((byte) DATA_EXPORT_SPDU);
-        int lenPos = buf.position();
-        buf.putShort((short) 0);
+        // 4-byte SPpdu header
+        buf.putShort((short) 0xE100); // session_id
+        buf.putShort((short) 0x0002); // p_context_id (fixed at 2)
 
         buf.putShort((short) ROIV_APDU);
         int roLenPos = buf.position();
@@ -3068,38 +3172,42 @@ public class CriticalInsightsMonitor extends JFrame {
         int cmdLenPos = buf.position();
         buf.putShort((short) 0);
 
+        // Managed Object: MDS
         buf.putShort((short) NOM_MOC_VMS_MDS);
         buf.putShort((short) 0); buf.putShort((short) 0);
 
-        buf.putInt(0);
-        buf.putShort((short) NOM_NOTI_MDS_CREAT);
+        // Event time (relative) + event type
+        buf.putInt(0); // relative time
+        buf.putShort((short) NOM_NOTI_MDS_CREAT); // event type
         int eventLenPos = buf.position();
-        buf.putShort((short) 0);
+        buf.putShort((short) 0); // event length placeholder
 
-        buf.putShort((short) 3);
+        // MDS Create Event data: ManagedObject + AttributeList
+        // (per MdsCreateEventImpl.parse: managedObject first, then attrs)
+        buf.putShort((short) NOM_MOC_VMS_MDS); // managed object oidType
+        buf.putShort((short) 0);               // context
+        buf.putShort((short) 0);               // handle
+
+        // Attribute list — minimal: just System Type
+        buf.putShort((short) 1);  // count = 1
         int attrListLenPos = buf.position();
-        buf.putShort((short) 0);
+        buf.putShort((short) 0);  // attr list length placeholder
         int attrStart = buf.position();
 
-        buf.putShort((short) NOM_ATTR_SYS_TYPE);
+        // Attribute: System Type
+        buf.putShort((short) NOM_ATTR_SYS_TYPE); // 0x0986
         buf.putShort((short) 4);
         buf.putShort((short) NOM_PART_OBJ);
         buf.putShort((short) NOM_MOC_VMS_MDS);
 
-        writePhSystemModel(buf);
-
-        buf.putShort((short) NOM_ATTR_TIME_ABS);
-        buf.putShort((short) 8);
-        writePhAbsoluteTime(buf);
-
         int attrEnd = buf.position();
-        buf.putShort(attrListLenPos, (short)(attrEnd - attrStart));
-        buf.putShort(eventLenPos, (short)(attrEnd - eventLenPos - 2));
 
+        // Fix lengths
+        buf.putShort(attrListLenPos, (short) (attrEnd - attrStart));
+        buf.putShort(eventLenPos, (short) (attrEnd - eventLenPos - 2));
         int end = buf.position();
-        buf.putShort(lenPos, (short)(end - lenPos - 2));
-        buf.putShort(roLenPos, (short)(end - roLenPos - 2));
-        buf.putShort(cmdLenPos, (short)(end - cmdLenPos - 2));
+        buf.putShort(roLenPos, (short) (end - roLenPos - 2));
+        buf.putShort(cmdLenPos, (short) (end - cmdLenPos - 2));
 
         buf.flip();
         sendUdp(socket, addr, buf);
@@ -3125,35 +3233,47 @@ public class CriticalInsightsMonitor extends JFrame {
         ByteBuffer buf = ByteBuffer.allocate(2048);
         buf.order(ByteOrder.BIG_ENDIAN);
 
-        buf.put((byte) DATA_EXPORT_SPDU);
-        int lenPos = buf.position();
-        buf.putShort((short) 0);
+        // 4-byte SPpdu header
+        buf.putShort((short) 0xE100); // session_id
+        buf.putShort((short) 0x0002); // p_context_id (fixed at 2)
 
+        // ROLRS (linked result)
         buf.putShort((short) ROLRS_APDU);
         int roLenPos = buf.position();
         buf.putShort((short) 0);
+
+        // Linked invoke ID
         buf.putShort((short) clientInvokeId);
-        buf.putShort((short) 1);
+
+        // Linked result number
+        buf.putShort((short) 1); // first segment
 
         buf.putShort((short) CMD_CONFIRMED_ACTION);
         int cmdLenPos = buf.position();
         buf.putShort((short) 0);
 
+        // Managed Object
         buf.putShort((short) NOM_MOC_VMS_MDS);
         buf.putShort((short) 0); buf.putShort((short) 0);
 
-        buf.putShort((short)(NOM_ACT_POLL_MDIB_DATA_EXT & 0xFFFF));
+        // Action type
+        buf.putShort((short)(NOM_ACT_POLL_MDIB_DATA & 0xFFFF));
         int actionLenPos = buf.position();
         buf.putShort((short) 0);
 
+        // Poll number + timestamps
         writePhPollHeader(buf);
 
-        buf.putShort((short) 1);
+        // Poll info list
+        buf.putShort((short) 1); // 1 context
         int pollInfoLenPos = buf.position();
         buf.putShort((short) 0);
         int pollInfoStart = buf.position();
-        buf.putShort((short) 0);
 
+        // SingleContextPoll
+        buf.putShort((short) 0); // mds_context
+
+        // Observation list: all numerics
         int[][] numerics = getPhNumerics();
         buf.putShort((short) numerics.length);
         int obsListLenPos = buf.position();
@@ -3167,7 +3287,9 @@ public class CriticalInsightsMonitor extends JFrame {
         int obsEnd = buf.position();
         buf.putShort(obsListLenPos, (short)(obsEnd - obsStart));
         buf.putShort(pollInfoLenPos, (short)(obsEnd - pollInfoStart));
-        fixPhLengths(buf, lenPos, roLenPos, cmdLenPos, actionLenPos);
+
+        // Fix lengths
+        fixPhLengths3(buf, roLenPos, cmdLenPos, actionLenPos);
 
         buf.flip();
         return buf;
@@ -3177,15 +3299,17 @@ public class CriticalInsightsMonitor extends JFrame {
         ByteBuffer buf = ByteBuffer.allocate(8192);
         buf.order(ByteOrder.BIG_ENDIAN);
 
-        buf.put((byte) DATA_EXPORT_SPDU);
-        int lenPos = buf.position();
-        buf.putShort((short) 0);
+        // 4-byte SPpdu header
+        buf.putShort((short) 0xE100); // session_id
+        buf.putShort((short) 0x0002); // p_context_id (fixed at 2)
 
+        // ROLRS
         buf.putShort((short) ROLRS_APDU);
         int roLenPos = buf.position();
         buf.putShort((short) 0);
+
         buf.putShort((short) clientInvokeId);
-        buf.putShort((short) 2);
+        buf.putShort((short) 2); // second segment
 
         buf.putShort((short) CMD_CONFIRMED_ACTION);
         int cmdLenPos = buf.position();
@@ -3194,18 +3318,21 @@ public class CriticalInsightsMonitor extends JFrame {
         buf.putShort((short) NOM_MOC_VMS_MDS);
         buf.putShort((short) 0); buf.putShort((short) 0);
 
-        buf.putShort((short)(NOM_ACT_POLL_MDIB_DATA_EXT & 0xFFFF));
+        buf.putShort((short)(NOM_ACT_POLL_MDIB_DATA & 0xFFFF));
         int actionLenPos = buf.position();
         buf.putShort((short) 0);
 
         writePhPollHeader(buf);
 
+        // Poll info list
         buf.putShort((short) 1);
         int pollInfoLenPos = buf.position();
         buf.putShort((short) 0);
         int pollInfoStart = buf.position();
-        buf.putShort((short) 0);
 
+        buf.putShort((short) 0); // mds_context
+
+        // 4 waveforms
         buf.putShort((short) 4);
         int obsListLenPos = buf.position();
         buf.putShort((short) 0);
@@ -3219,7 +3346,9 @@ public class CriticalInsightsMonitor extends JFrame {
         int obsEnd = buf.position();
         buf.putShort(obsListLenPos, (short)(obsEnd - obsStart));
         buf.putShort(pollInfoLenPos, (short)(obsEnd - pollInfoStart));
-        fixPhLengths(buf, lenPos, roLenPos, cmdLenPos, actionLenPos);
+
+        // Fix lengths
+        fixPhLengths3(buf, roLenPos, cmdLenPos, actionLenPos);
 
         buf.flip();
         return buf;
@@ -3229,15 +3358,16 @@ public class CriticalInsightsMonitor extends JFrame {
         ByteBuffer buf = ByteBuffer.allocate(2048);
         buf.order(ByteOrder.BIG_ENDIAN);
 
-        buf.put((byte) DATA_EXPORT_SPDU);
-        int lenPos = buf.position();
-        buf.putShort((short) 0);
+        // 4-byte SPpdu header
+        buf.putShort((short) 0xE100); // session_id
+        buf.putShort((short) 0x0002); // p_context_id (fixed at 2)
 
+        // RORS (final result)
         buf.putShort((short) RORS_APDU);
         int roLenPos = buf.position();
         buf.putShort((short) 0);
-        buf.putShort((short) clientInvokeId);
 
+        buf.putShort((short) clientInvokeId);
         buf.putShort((short) CMD_CONFIRMED_ACTION);
         int cmdLenPos = buf.position();
         buf.putShort((short) 0);
@@ -3245,18 +3375,21 @@ public class CriticalInsightsMonitor extends JFrame {
         buf.putShort((short) NOM_MOC_VMS_MDS);
         buf.putShort((short) 0); buf.putShort((short) 0);
 
-        buf.putShort((short)(NOM_ACT_POLL_MDIB_DATA_EXT & 0xFFFF));
+        buf.putShort((short)(NOM_ACT_POLL_MDIB_DATA & 0xFFFF));
         int actionLenPos = buf.position();
         buf.putShort((short) 0);
 
         writePhPollHeader(buf);
 
+        // Poll info list: 1 context with multiple obs
         buf.putShort((short) 1);
         int pollInfoLenPos = buf.position();
         buf.putShort((short) 0);
         int pollInfoStart = buf.position();
-        buf.putShort((short) 0);
 
+        buf.putShort((short) 0); // mds_context
+
+        // 3 observations: alarm monitor, patient demog, enum
         buf.putShort((short) 3);
         int obsListLenPos = buf.position();
         buf.putShort((short) 0);
@@ -3269,7 +3402,9 @@ public class CriticalInsightsMonitor extends JFrame {
         int obsEnd = buf.position();
         buf.putShort(obsListLenPos, (short)(obsEnd - obsStart));
         buf.putShort(pollInfoLenPos, (short)(obsEnd - pollInfoStart));
-        fixPhLengths(buf, lenPos, roLenPos, cmdLenPos, actionLenPos);
+
+        // Fix lengths
+        fixPhLengths3(buf, roLenPos, cmdLenPos, actionLenPos);
 
         buf.flip();
         return buf;
@@ -3279,13 +3414,14 @@ public class CriticalInsightsMonitor extends JFrame {
         ByteBuffer buf = ByteBuffer.allocate(2048);
         buf.order(ByteOrder.BIG_ENDIAN);
 
-        buf.put((byte) DATA_EXPORT_SPDU);
-        int lenPos = buf.position();
-        buf.putShort((short) 0);
+        // 4-byte SPpdu header
+        buf.putShort((short) 0xE100); // session_id
+        buf.putShort((short) 0x0002); // p_context_id (fixed at 2)
 
         buf.putShort((short) RORS_APDU);
         int roLenPos = buf.position();
         buf.putShort((short) 0);
+
         buf.putShort((short) invokeId);
         buf.putShort((short) CMD_CONFIRMED_ACTION);
         int cmdLenPos = buf.position();
@@ -3294,17 +3430,19 @@ public class CriticalInsightsMonitor extends JFrame {
         buf.putShort((short) NOM_MOC_VMS_MDS);
         buf.putShort((short) 0); buf.putShort((short) 0);
 
-        buf.putShort((short)(NOM_ACT_POLL_MDIB_DATA_EXT & 0xFFFF));
+        buf.putShort((short)(NOM_ACT_POLL_MDIB_DATA & 0xFFFF));
         int actionLenPos = buf.position();
         buf.putShort((short) 0);
 
         writePhPollHeader(buf);
 
+        // Poll info list
         buf.putShort((short) 1);
         int pollInfoLenPos = buf.position();
         buf.putShort((short) 0);
         int pollInfoStart = buf.position();
-        buf.putShort((short) 0);
+
+        buf.putShort((short) 0); // mds_context
 
         int[][] numerics = getPhNumerics();
         buf.putShort((short) numerics.length);
@@ -3319,7 +3457,9 @@ public class CriticalInsightsMonitor extends JFrame {
         int obsEnd = buf.position();
         buf.putShort(obsListLenPos, (short)(obsEnd - obsStart));
         buf.putShort(pollInfoLenPos, (short)(obsEnd - pollInfoStart));
-        fixPhLengths(buf, lenPos, roLenPos, cmdLenPos, actionLenPos);
+
+        // Fix lengths
+        fixPhLengths3(buf, roLenPos, cmdLenPos, actionLenPos);
 
         buf.flip();
         sendUdp(socket, addr, buf);
@@ -3329,33 +3469,39 @@ public class CriticalInsightsMonitor extends JFrame {
         ByteBuffer buf = ByteBuffer.allocate(512);
         buf.order(ByteOrder.BIG_ENDIAN);
 
-        buf.put((byte) DATA_EXPORT_SPDU);
-        int lenPos = buf.position();
-        buf.putShort((short) 0);
+        // 4-byte SPpdu header
+        buf.putShort((short) 0xE100); // session_id
+        buf.putShort((short) 0x0002); // p_context_id (fixed at 2)
 
         buf.putShort((short) RORS_APDU);
         int roLenPos = buf.position();
         buf.putShort((short) 0);
+
         buf.putShort((short) invokeId);
         buf.putShort((short) CMD_GET);
         int cmdLenPos = buf.position();
         buf.putShort((short) 0);
 
+        // Managed Object
         buf.putShort((short) NOM_MOC_VMS_MDS);
         buf.putShort((short) 0); buf.putShort((short) 0);
 
+        // Attribute list
         buf.putShort((short) 3);
         int attrListLenPos = buf.position();
         buf.putShort((short) 0);
         int attrStart = buf.position();
 
+        // Attribute: System Type
         buf.putShort((short) NOM_ATTR_SYS_TYPE);
         buf.putShort((short) 4);
         buf.putShort((short) NOM_PART_OBJ);
         buf.putShort((short) NOM_MOC_VMS_MDS);
 
+        // Attribute: System Model
         writePhSystemModel(buf);
 
+        // Attribute: Absolute Time
         buf.putShort((short) NOM_ATTR_TIME_ABS);
         buf.putShort((short) 8);
         writePhAbsoluteTime(buf);
@@ -3363,8 +3509,8 @@ public class CriticalInsightsMonitor extends JFrame {
         int attrEnd = buf.position();
         buf.putShort(attrListLenPos, (short)(attrEnd - attrStart));
 
+        // Fix lengths
         int end = buf.position();
-        buf.putShort(lenPos, (short)(end - lenPos - 2));
         buf.putShort(roLenPos, (short)(end - roLenPos - 2));
         buf.putShort(cmdLenPos, (short)(end - cmdLenPos - 2));
 
@@ -3375,8 +3521,9 @@ public class CriticalInsightsMonitor extends JFrame {
     private void sendPhilipsEmptyResult(DatagramSocket socket, InetSocketAddress addr, int invokeId, int cmdType) throws IOException {
         ByteBuffer buf = ByteBuffer.allocate(32);
         buf.order(ByteOrder.BIG_ENDIAN);
-        buf.put((byte) DATA_EXPORT_SPDU);
-        buf.putShort((short) 16);
+        // 4-byte SPpdu header
+        buf.putShort((short) 0xE100); // session_id
+        buf.putShort((short) 0x0002); // p_context_id
         buf.putShort((short) RORS_APDU);
         buf.putShort((short) 12);
         buf.putShort((short) invokeId);
@@ -3429,40 +3576,24 @@ public class CriticalInsightsMonitor extends JFrame {
     private void writePhNumericObs(ByteBuffer buf, int[] n) {
         int physioId = n[0], value = n[1], unitCode = n[2], handle = n[3], isTemp = n[4];
 
+        // Per ObservationPollImpl.parse(): handle(u16) + AttributeList(count+length+AVAs)
         buf.putShort((short) handle);
 
-        buf.putShort((short) 4);
+        // Attribute list: just NOM_ATTR_NU_VAL_OBS for reliability
+        buf.putShort((short) 1); // count = 1 attribute
         int attrListLenPos = buf.position();
-        buf.putShort((short) 0);
+        buf.putShort((short) 0); // length placeholder
         int attrStart = buf.position();
 
-        buf.putShort((short) NOM_ATTR_NU_VAL_OBS);
-        buf.putShort((short) 12);
-        buf.putShort((short) NOM_PART_SCADA);
-        buf.putShort((short) physioId);
-        buf.putShort((short) 0x0000);
-        buf.putShort((short) NOM_PART_DIM);
-        buf.putShort((short) unitCode);
-        buf.putInt(encodePhFloat(value, isTemp != 0));
-
-        buf.putShort((short) NOM_ATTR_ID_LABEL);
-        buf.putShort((short) 4);
-        buf.putInt(physioId);
-
-        String label = getPhLabel(physioId);
-        byte[] labelBytes = label.getBytes();
-        int labelPadded = (labelBytes.length + 1) & ~1;
-        buf.putShort((short) NOM_ATTR_ID_LABEL_STRING);
-        buf.putShort((short)(2 + labelPadded));
-        buf.putShort((short) labelBytes.length);
-        buf.put(labelBytes);
-        if (labelBytes.length % 2 != 0) buf.put((byte) 0);
-
-        buf.putShort((short) NOM_ATTR_METRIC_SPECN);
-        buf.putShort((short) 8);
-        buf.putInt(8000);
-        buf.putShort((short) METRIC_CAT_MEAS);
-        buf.putShort((short)(METRIC_ACCESS_AVAIL | METRIC_ACCESS_RD_ONLY));
+        // NOM_ATTR_NU_VAL_OBS (NumericObservedValue) — 12 bytes value
+        buf.putShort((short) NOM_ATTR_NU_VAL_OBS); // attribute_id
+        buf.putShort((short) 12);                   // value length
+        buf.putShort((short) NOM_PART_SCADA);       // physio_id partition
+        buf.putShort((short) physioId);              // physio_id code
+        buf.putShort((short) 0x0000);               // measurement state (valid)
+        buf.putShort((short) NOM_PART_DIM);         // unit_code partition
+        buf.putShort((short) unitCode);              // unit_code code
+        buf.putInt(encodePhFloat(value, isTemp != 0)); // FLOATType value
 
         int attrEnd = buf.position();
         buf.putShort(attrListLenPos, (short)(attrEnd - attrStart));
@@ -3818,9 +3949,15 @@ public class CriticalInsightsMonitor extends JFrame {
     // --- Philips Helpers ---
 
     private void writePhPollHeader(ByteBuffer buf) {
+        // Per SinglePollDataResultImpl.parse():
+        // pollNumber(u16) + relativeTime(u32) + absoluteTime(8 BCD) +
+        // polledObjectType(Type: partition(u16)+code(u16)) + polledAttrGroup(u16)
         buf.putShort((short) phPollNumber);
-        buf.putInt((int)((System.currentTimeMillis() & 0xFFFFFFFFL) * 8));
-        writePhAbsoluteTime(buf);
+        buf.putInt((int)((System.currentTimeMillis() & 0xFFFFFFFFL) * 8)); // relativeTime
+        writePhAbsoluteTime(buf); // 8 bytes BCD
+        buf.putShort((short) NOM_PART_OBJ);         // polledObjectType.partition
+        buf.putShort((short) NOM_MOC_VMO_METRIC_NU); // polledObjectType.code
+        buf.putShort((short) 0x0000);                // polledAttrGroup = all
     }
 
     private void writePhAbsoluteTime(ByteBuffer buf) {
@@ -3903,12 +4040,11 @@ public class CriticalInsightsMonitor extends JFrame {
         return ((bestExp & 0xFF) << 24) | (bestMantissa & 0x00FFFFFF);
     }
 
-    private void fixPhLengths(ByteBuffer buf, int lenPos, int roLenPos, int cmdLenPos, int actionLenPos) {
+    private void fixPhLengths3(ByteBuffer buf, int roLenPos, int cmdLenPos, int actionLenPos) {
         int end = buf.position();
         buf.putShort(actionLenPos, (short)(end - actionLenPos - 2));
         buf.putShort(cmdLenPos, (short)(end - cmdLenPos - 2));
         buf.putShort(roLenPos, (short)(end - roLenPos - 2));
-        buf.putShort(lenPos, (short)(end - lenPos - 2));
     }
 
     private void sendUdp(DatagramSocket socket, InetSocketAddress addr, ByteBuffer buf) throws IOException {
