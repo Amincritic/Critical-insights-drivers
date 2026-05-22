@@ -121,22 +121,22 @@ public class CriticalInsightsMonitor extends JFrame {
     static final int NOM_ATTR_PT_WEIGHT           = 0x0994;
     static final int NOM_ATTR_PT_BSA              = 0x0995;
 
-    static final int NOM_ECG_CARD_BEAT_RATE       = 0x4002;
+    static final int NOM_ECG_CARD_BEAT_RATE       = 0x4182;
     static final int NOM_PULS_OXIM_SAT_O2        = 0x4BB8;
-    static final int NOM_PULS_OXIM_PULS_RATE     = 0x4BB0;
-    static final int NOM_RESP_RATE               = 0x5000;
-    static final int NOM_PRESS_BLD_ART_ABP_SYS   = 0x4A51;
-    static final int NOM_PRESS_BLD_ART_ABP_DIA   = 0x4A52;
-    static final int NOM_PRESS_BLD_ART_ABP_MEAN  = 0x4A53;
-    static final int NOM_PRESS_BLD_NONINV_SYS    = 0x4A21;
-    static final int NOM_PRESS_BLD_NONINV_DIA    = 0x4A22;
-    static final int NOM_PRESS_BLD_NONINV_MEAN   = 0x4A23;
-    static final int NOM_CO2_ET                  = 0x5108;
-    static final int NOM_TEMP_BLD                = 0x4BB4;
+    static final int NOM_PULS_OXIM_PULS_RATE     = 0x480A;
+    static final int NOM_RESP_RATE               = 0x500A;
+    static final int NOM_PRESS_BLD_ART_ABP_SYS   = 0x4A15;
+    static final int NOM_PRESS_BLD_ART_ABP_DIA   = 0x4A16;
+    static final int NOM_PRESS_BLD_ART_ABP_MEAN  = 0x4A17;
+    static final int NOM_PRESS_BLD_NONINV_SYS    = 0x4A05;
+    static final int NOM_PRESS_BLD_NONINV_DIA    = 0x4A06;
+    static final int NOM_PRESS_BLD_NONINV_MEAN   = 0x4A07;
+    static final int NOM_CO2_ET                  = 0x50B0;
+    static final int NOM_TEMP_BLD                = 0xE014;
     static final int NOM_PRESS_BLD_VEN_CENT      = 0x4A44;
-    static final int NOM_PRESS_BLD_ART_PULM_SYS  = 0x4A61;
-    static final int NOM_PRESS_BLD_ART_PULM_DIA  = 0x4A62;
-    static final int NOM_PRESS_BLD_ART_PULM_MEAN = 0x4A63;
+    static final int NOM_PRESS_BLD_ART_PULM_SYS  = 0x4A1D;
+    static final int NOM_PRESS_BLD_ART_PULM_DIA  = 0x4A1E;
+    static final int NOM_PRESS_BLD_ART_PULM_MEAN = 0x4A1F;
 
     static final int NOM_ECG_ELEC_POTL_II_SA  = 0x0102;
     static final int NOM_PLETH_PULS_OXIM_SA   = 0x4BB4;

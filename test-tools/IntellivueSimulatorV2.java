@@ -114,23 +114,23 @@ public class IntellivueSimulatorV2 {
     static final int NOM_NOTI_MDS_CREAT  = 0x0D06;
     static final int NOM_NOTI_CONN_INDIC = 0x0D02;
 
-    // Physiological IDs (NOM_PART_SCADA = 2)
-    static final int NOM_ECG_CARD_BEAT_RATE      = 0x4002; // Heart Rate
+    // Physiological IDs (NOM_PART_SCADA = 2) — must match driver's ObservedValue enum
+    static final int NOM_ECG_CARD_BEAT_RATE      = 0x4182; // Heart Rate
     static final int NOM_PULS_OXIM_SAT_O2        = 0x4BB8; // SpO2
-    static final int NOM_PULS_OXIM_PULS_RATE     = 0x4BB0; // Pulse Rate
-    static final int NOM_RESP_RATE               = 0x5000; // Respiration Rate
-    static final int NOM_PRESS_BLD_ART_ABP_SYS   = 0x4A51; // ABP Systolic
-    static final int NOM_PRESS_BLD_ART_ABP_DIA   = 0x4A52; // ABP Diastolic
-    static final int NOM_PRESS_BLD_ART_ABP_MEAN  = 0x4A53; // ABP Mean
-    static final int NOM_PRESS_BLD_NONINV_SYS    = 0x4A21; // NBP Systolic
-    static final int NOM_PRESS_BLD_NONINV_DIA    = 0x4A22; // NBP Diastolic
-    static final int NOM_PRESS_BLD_NONINV_MEAN   = 0x4A23; // NBP Mean
-    static final int NOM_CO2_ET                  = 0x5108; // End-tidal CO2
-    static final int NOM_TEMP_BLD                = 0x4BB4; // Blood Temperature
+    static final int NOM_PULS_OXIM_PULS_RATE     = 0x480A; // Pulse Rate (NOM_PULS_RATE)
+    static final int NOM_RESP_RATE               = 0x500A; // Respiration Rate
+    static final int NOM_PRESS_BLD_ART_ABP_SYS   = 0x4A15; // ABP Systolic
+    static final int NOM_PRESS_BLD_ART_ABP_DIA   = 0x4A16; // ABP Diastolic
+    static final int NOM_PRESS_BLD_ART_ABP_MEAN  = 0x4A17; // ABP Mean
+    static final int NOM_PRESS_BLD_NONINV_SYS    = 0x4A05; // NBP Systolic
+    static final int NOM_PRESS_BLD_NONINV_DIA    = 0x4A06; // NBP Diastolic
+    static final int NOM_PRESS_BLD_NONINV_MEAN   = 0x4A07; // NBP Mean
+    static final int NOM_CO2_ET                  = 0x50B0; // End-tidal CO2 (NOM_AWAY_CO2_ET)
+    static final int NOM_TEMP_BLD                = 0xE014; // Blood Temperature
     static final int NOM_PRESS_BLD_VEN_CENT      = 0x4A44; // CVP
-    static final int NOM_PRESS_BLD_ART_PULM_SYS  = 0x4A61; // PAP Systolic
-    static final int NOM_PRESS_BLD_ART_PULM_DIA  = 0x4A62; // PAP Diastolic
-    static final int NOM_PRESS_BLD_ART_PULM_MEAN = 0x4A63; // PAP Mean
+    static final int NOM_PRESS_BLD_ART_PULM_SYS  = 0x4A1D; // PAP Systolic
+    static final int NOM_PRESS_BLD_ART_PULM_DIA  = 0x4A1E; // PAP Diastolic
+    static final int NOM_PRESS_BLD_ART_PULM_MEAN = 0x4A1F; // PAP Mean
 
     // Waveform physio IDs
     static final int NOM_ECG_ELEC_POTL_II  = 0x0102; // ECG Lead II
