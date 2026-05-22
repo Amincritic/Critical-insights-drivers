@@ -11,6 +11,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.mdpnp.devices.headless.FileJsonPublisher;
 import org.mdpnp.devices.headless.HttpJsonPublisher;
 import org.mdpnp.devices.headless.MultiJsonPublisher;
+import org.mdpnp.devices.headless.WebDashboardPublisher;
 import org.mdpnp.devices.headless.QueuedJsonPublisher;
 import org.mdpnp.devices.headless.StdoutJsonPublisher;
 import org.mdpnp.devices.net.NetworkLoop;
@@ -21,7 +22,7 @@ public final class HeadlessPhilipsGatewayApp {
 
     public static void main(String[] args) throws Exception {
         final Args a = Args.parse(args);
-        final MultiJsonPublisher sinks = buildSinks(a.stdout, a.jsonl, a.httpUrl, a.httpTimeoutMs, a.httpHeaders, a.allowInsecureHttp);
+        final MultiJsonPublisher sinks = buildSinks(a.stdout, a.jsonl, a.httpUrl, a.httpTimeoutMs, a.httpHeaders, a.allowInsecureHttp, a.webPort);
         final QueuedJsonPublisher queued = buildQueue(sinks, a);
         final AtomicBoolean running = new AtomicBoolean(true);
         queued.start();
@@ -57,12 +58,16 @@ public final class HeadlessPhilipsGatewayApp {
         }
     }
 
-    private static MultiJsonPublisher buildSinks(Boolean stdout, String jsonl, String httpUrl, int httpTimeoutMs, Map<String, String> headers, boolean allowInsecureHttp) throws Exception {
+    private static MultiJsonPublisher buildSinks(Boolean stdout, String jsonl, String httpUrl, int httpTimeoutMs, Map<String, String> headers, boolean allowInsecureHttp, int webPort) throws Exception {
         MultiJsonPublisher sinks = new MultiJsonPublisher();
-        boolean enableStdout = stdout != null ? stdout.booleanValue() : (jsonl == null && httpUrl == null);
+        boolean enableStdout = stdout != null ? stdout.booleanValue() : (jsonl == null && httpUrl == null && webPort <= 0);
         if (enableStdout) { sinks.add(new StdoutJsonPublisher()); }
         if (jsonl != null) { sinks.add(new FileJsonPublisher(Paths.get(jsonl))); }
         if (httpUrl != null) { sinks.add(new HttpJsonPublisher(httpUrl, httpTimeoutMs, headers, allowInsecureHttp)); }
+        if (webPort > 0) {
+            sinks.add(new WebDashboardPublisher(webPort, webPort + 1));
+            System.err.println("Web dashboard: http://localhost:" + webPort);
+        }
         return sinks;
     }
 
@@ -88,6 +93,7 @@ public final class HeadlessPhilipsGatewayApp {
         Map<String, String> httpHeaders = new LinkedHashMap<String, String>();
         int httpTimeoutMs = 3000;
         boolean allowInsecureHttp = false;
+        int webPort = 0;
         int queueCapacity = 10000;
         int publishAttempts = 5;
         long publishRetryBackoffMs = 500L;
@@ -112,6 +118,7 @@ public final class HeadlessPhilipsGatewayApp {
                 else if ("--http-header".equals(k)) { addHeader(a.httpHeaders, required(k, v)); i++; }
                 else if ("--http-timeout-ms".equals(k)) { a.httpTimeoutMs = Integer.parseInt(required(k, v)); i++; }
                 else if ("--allow-insecure-http".equals(k)) { a.allowInsecureHttp = Boolean.parseBoolean(required(k, v)); i++; }
+                else if ("--web-port".equals(k)) { a.webPort = Integer.parseInt(required(k, v)); i++; }
                 else if ("--queue-capacity".equals(k)) { a.queueCapacity = Integer.parseInt(required(k, v)); i++; }
                 else if ("--publish-attempts".equals(k)) { a.publishAttempts = Integer.parseInt(required(k, v)); i++; }
                 else if ("--publish-retry-backoff-ms".equals(k)) { a.publishRetryBackoffMs = Long.parseLong(required(k, v)); i++; }

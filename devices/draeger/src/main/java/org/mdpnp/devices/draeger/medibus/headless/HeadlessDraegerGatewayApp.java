@@ -14,6 +14,7 @@ import org.mdpnp.devices.draeger.medibus.types.Command;
 import org.mdpnp.devices.headless.FileJsonPublisher;
 import org.mdpnp.devices.headless.HttpJsonPublisher;
 import org.mdpnp.devices.headless.MultiJsonPublisher;
+import org.mdpnp.devices.headless.WebDashboardPublisher;
 import org.mdpnp.devices.headless.QueuedJsonPublisher;
 import org.mdpnp.devices.headless.StdoutJsonPublisher;
 import org.mdpnp.devices.serial.SerialProvider;
@@ -29,7 +30,7 @@ public final class HeadlessDraegerGatewayApp {
 
     public static void main(String[] args) throws Exception {
         final Args a = Args.parse(args);
-        final MultiJsonPublisher sinks = buildSinks(a.stdout, a.jsonl, a.httpUrl, a.httpTimeoutMs, a.httpHeaders, a.allowInsecureHttp);
+        final MultiJsonPublisher sinks = buildSinks(a.stdout, a.jsonl, a.httpUrl, a.httpTimeoutMs, a.httpHeaders, a.allowInsecureHttp, a.webPort);
         final QueuedJsonPublisher queued = buildQueue(sinks, a);
         final AtomicBoolean running = new AtomicBoolean(true);
         queued.start();
@@ -61,12 +62,16 @@ public final class HeadlessDraegerGatewayApp {
         }
     }
 
-    private static MultiJsonPublisher buildSinks(Boolean stdout, String jsonl, String httpUrl, int httpTimeoutMs, Map<String, String> headers, boolean allowInsecureHttp) throws Exception {
+    private static MultiJsonPublisher buildSinks(Boolean stdout, String jsonl, String httpUrl, int httpTimeoutMs, Map<String, String> headers, boolean allowInsecureHttp, int webPort) throws Exception {
         MultiJsonPublisher sinks = new MultiJsonPublisher();
-        boolean enableStdout = stdout != null ? stdout.booleanValue() : (jsonl == null && httpUrl == null);
+        boolean enableStdout = stdout != null ? stdout.booleanValue() : (jsonl == null && httpUrl == null && webPort <= 0);
         if (enableStdout) { sinks.add(new StdoutJsonPublisher()); }
         if (jsonl != null) { sinks.add(new FileJsonPublisher(Paths.get(jsonl))); }
         if (httpUrl != null) { sinks.add(new HttpJsonPublisher(httpUrl, httpTimeoutMs, headers, allowInsecureHttp)); }
+        if (webPort > 0) {
+            sinks.add(new WebDashboardPublisher(webPort, webPort + 1));
+            System.err.println("Web dashboard: http://localhost:" + webPort);
+        }
         return sinks;
     }
 
@@ -179,6 +184,7 @@ public final class HeadlessDraegerGatewayApp {
         long connectTimeoutMs = 10000L;
         int serialBaud = 19200;
         Parity serialParity = Parity.Even;
+        int webPort = 0;
 
         static Args parse(String[] args) {
             Args a = new Args();
@@ -187,6 +193,7 @@ public final class HeadlessDraegerGatewayApp {
                 if ("--serial".equals(k)) { a.serial = required(k,v); i++; }
                 else if ("--serial-baud".equals(k)) { a.serialBaud = Integer.parseInt(required(k,v)); i++; }
                 else if ("--serial-parity".equals(k)) { a.serialParity = parseParity(required(k,v)); i++; }
+                else if ("--web-port".equals(k)) { a.webPort = Integer.parseInt(required(k,v)); i++; }
                 else if ("--tcp-host".equals(k)) { a.tcpHost = required(k,v); i++; }
                 else if ("--tcp-port".equals(k)) { a.tcpPort = Integer.parseInt(required(k,v)); i++; }
                 else if ("--gateway-id".equals(k)) { a.gatewayId = required(k,v); i++; }

@@ -21,6 +21,7 @@ import org.mdpnp.devices.draeger.medibus.types.Command;
 import org.mdpnp.devices.headless.FileJsonPublisher;
 import org.mdpnp.devices.headless.HttpJsonPublisher;
 import org.mdpnp.devices.headless.MultiJsonPublisher;
+import org.mdpnp.devices.headless.WebDashboardPublisher;
 import org.mdpnp.devices.headless.QueuedJsonPublisher;
 import org.mdpnp.devices.headless.StdoutJsonPublisher;
 import org.mdpnp.devices.net.NetworkLoop;
@@ -90,7 +91,7 @@ public final class HeadlessMultiDeviceGatewayApp {
             throw new IllegalArgumentException("Enable at least one device: --philips-host, --philips-serial, or --draeger-serial");
         }
 
-        MultiJsonPublisher sinks = buildSinks(a.stdout, a.jsonl, a.httpUrl, a.httpTimeoutMs, a.httpHeaders, a.allowInsecureHttp);
+        MultiJsonPublisher sinks = buildSinks(a.stdout, a.jsonl, a.httpUrl, a.httpTimeoutMs, a.httpHeaders, a.allowInsecureHttp, a.webPort);
         final QueuedJsonPublisher queue = buildQueue(sinks, a);
         final AtomicBoolean running = new AtomicBoolean(true);
         final List<Thread> deviceThreads = new ArrayList<Thread>();
@@ -119,12 +120,16 @@ public final class HeadlessMultiDeviceGatewayApp {
         }
     }
 
-    private static MultiJsonPublisher buildSinks(Boolean stdout, String jsonl, String httpUrl, int httpTimeoutMs, Map<String, String> headers, boolean allowInsecureHttp) throws Exception {
+    private static MultiJsonPublisher buildSinks(Boolean stdout, String jsonl, String httpUrl, int httpTimeoutMs, Map<String, String> headers, boolean allowInsecureHttp, int webPort) throws Exception {
         MultiJsonPublisher sinks = new MultiJsonPublisher();
-        boolean enableStdout = stdout != null ? stdout.booleanValue() : (jsonl == null && httpUrl == null);
+        boolean enableStdout = stdout != null ? stdout.booleanValue() : (jsonl == null && httpUrl == null && webPort <= 0);
         if (enableStdout) { sinks.add(new StdoutJsonPublisher()); }
         if (jsonl != null) { sinks.add(new FileJsonPublisher(Paths.get(jsonl))); }
         if (httpUrl != null) { sinks.add(new HttpJsonPublisher(httpUrl, httpTimeoutMs, headers, allowInsecureHttp)); }
+        if (webPort > 0) {
+            sinks.add(new WebDashboardPublisher(webPort, webPort + 1));
+            System.err.println("Web dashboard: http://localhost:" + webPort);
+        }
         return sinks;
     }
 
@@ -331,6 +336,7 @@ public final class HeadlessMultiDeviceGatewayApp {
         long draegerPollMs = 1000L;
         int draegerBaud = 19200;
         Parity draegerParity = Parity.Even;
+        int webPort = 0;
 
         static Args parse(String[] args) {
             Args a = new Args();
@@ -362,6 +368,7 @@ public final class HeadlessMultiDeviceGatewayApp {
                 else if ("--draeger-poll-ms".equals(k)) { a.draegerPollMs = Long.parseLong(required(k, v)); i++; }
                 else if ("--draeger-baud".equals(k)) { a.draegerBaud = Integer.parseInt(required(k, v)); i++; }
                 else if ("--draeger-parity".equals(k)) { a.draegerParity = parseParity(required(k, v)); i++; }
+                else if ("--web-port".equals(k)) { a.webPort = Integer.parseInt(required(k, v)); i++; }
                 else if ("--help".equals(k)) { usageAndExit(); }
                 else { throw new IllegalArgumentException("Unknown argument: " + k); }
             }
