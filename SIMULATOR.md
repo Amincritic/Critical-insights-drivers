@@ -1,14 +1,16 @@
 # Device Simulators
 
-This project includes three ways to simulate Draeger ventilators and Philips patient monitors without real hardware.
+This project includes multiple ways to simulate Draeger ventilators and Philips patient monitors without real hardware.
 
 ## Quick Reference
 
 | Simulator | Command | Protocol |
 |-----------|---------|----------|
 | GUI (both devices) | `java -cp test-tools SimulatorGui` | Interactive sliders + alarm triggers |
-| Draeger CLI | `java -cp test-tools MedibusSimulator --tcp 9100` | MEDIBUS Rev 6.00 compliant |
-| Philips CLI | `java -cp test-tools IntellivueSimulator --port 24105` | IntelliVue Rev G.0 compliant |
+| Draeger CLI (TCP) | `java -cp test-tools MedibusSimulator --tcp 9100` | MEDIBUS Rev 6.00 compliant |
+| Draeger CLI (serial) | `java -cp test-tools MedibusSimulator --serial /tmp/draeger-device` | MEDIBUS over RS-232 |
+| Philips CLI (UDP) | `java -cp test-tools IntellivueSimulator --port 24105` | IntelliVue over LAN/UDP |
+| Philips CLI (serial) | `java -cp test-tools IntellivueSerialSimulator --serial /tmp/philips-device` | IntelliVue MIB/RS232 |
 | Basic test | `./test.sh` | Automated 30-second Draeger test |
 
 ## Compile (once)
@@ -17,6 +19,7 @@ This project includes three ways to simulate Draeger ventilators and Philips pat
 javac test-tools/SimulatorGui.java
 javac test-tools/MedibusSimulator.java
 javac test-tools/IntellivueSimulator.java
+javac test-tools/IntellivueSerialSimulator.java
 ```
 
 Or compile all at once:
@@ -209,11 +212,96 @@ Protocol features:
 - 12 simulated vitals: HR, SpO2, Pulse Rate, Resp Rate, ABP (sys/dia/mean), NBP (sys/dia/mean), etCO2, Temperature
 - Vitals vary over time with realistic patterns
 
+### Philips IntelliVue MIB/RS232 Serial Simulator
+
+Spec-compliant simulator using the **Fixed Baudrate Protocol** from the Philips IntelliVue Programming Guide (Rev G.0, Chapter 4). This simulates a Philips MX800 connected over the MIB/RS232 serial port.
+
+Requires `socat` for virtual serial ports:
+```bash
+sudo apt install socat
+```
+
+**Step by step:**
+
+```bash
+# Terminal 1 — create virtual serial port pair
+socat -d -d \
+  pty,raw,echo=0,link=/tmp/philips-device \
+  pty,raw,echo=0,link=/tmp/philips-gateway &
+
+# Terminal 2 — start MIB/RS232 simulator
+java -cp test-tools IntellivueSerialSimulator --serial /tmp/philips-device
+
+# Terminal 3 — connect gateway via serial
+./run.sh --philips-serial /tmp/philips-gateway --stdout
+```
+
+**How it works:**
+
+```
+IntellivueSerialSimulator          socat PTY pair          Gateway
+(writes MIB/RS232 frames)       (virtual serial link)    (--philips-serial)
+        │                              │                      │
+        │── BOF+Hdr+Data+FCS+EOF ────→ │                      │
+        │   /tmp/philips-device        │  /tmp/philips-gateway │
+        │                              │ ────────────────────→ │
+        │                              │                      │── RS232Adapter
+        │                              │ ←──────────────────── │   (serial→UDP bridge)
+        │←── BOF+Hdr+Data+FCS+EOF ──── │                      │
+```
+
+**Frame format (per spec page 30):**
+
+```
+BOF(0xC0) | Header | User Data | FCS(CRC-CCITT) | EOF(0xC1)
+
+Header:
+  protocol_id = 0x11 (Data Export)
+  msg_type    = 0x01 (Association/Data Export Command)
+  length      = 2 bytes, big-endian (user data length)
+```
+
+**Byte escaping (transparency, per spec page 31):**
+
+For bytes 0xC0, 0xC1, 0x7D in Header, User Data, or FCS:
+- Insert 0x7D (escape) before the byte
+- XOR the byte with 0x20
+
+**FCS (per spec page 31):**
+- 16-bit CRC-CCITT (PPP style, not XMODEM)
+- One's complement of the CRC is transmitted
+- LSB first
+
+Protocol features:
+- Same Data Export protocol as UDP, wrapped in serial framing
+- Association Request/Response over serial
+- MDS Create Event
+- Extended Poll Data Result with 12 numeric observed values
+- FLOAT-Type encoding
+- CRC validation on received frames
+- Proper byte escaping on transmitted frames
+- 12 simulated vitals with realistic variation
+
+**Simulator output:**
+
+```
+IntellivueSerialSimulator opening: /tmp/philips-device
+Protocol: MIB/RS232 Fixed Baudrate (115200 8N1)
+
+  <- Association Request (MIB/RS232)
+  -> Association Response
+  -> MDS Create Event
+  <- Poll Request #1
+  -> Poll Result: HR=72 SpO2=97 RR=16 ABP=120/80 etCO2=38 T=37.0
+  <- Poll Request #2
+  -> Poll Result: HR=74 SpO2=98 RR=15 ABP=118/79 etCO2=37 T=37.1
+```
+
 ---
 
 ## Both Simulators Together
 
-### With CLI simulators
+### With CLI simulators (TCP/UDP)
 
 ```bash
 # Terminal 1
@@ -229,6 +317,29 @@ devices/multidevice/build/install/multidevice/bin/multidevice \
   --draeger-serial NONE \
   --stdout true
 ```
+
+### With CLI simulators (serial — closest to real hardware)
+
+```bash
+# Terminal 1 — create two virtual serial pairs
+socat -d -d pty,raw,echo=0,link=/tmp/draeger-device pty,raw,echo=0,link=/tmp/draeger-gateway &
+socat -d -d pty,raw,echo=0,link=/tmp/philips-device pty,raw,echo=0,link=/tmp/philips-gateway &
+
+# Terminal 2 — Draeger serial simulator
+java -cp test-tools MedibusSimulator --serial /tmp/draeger-device
+
+# Terminal 3 — Philips MIB/RS232 serial simulator
+java -cp test-tools IntellivueSerialSimulator --serial /tmp/philips-device
+
+# Terminal 4 — gateway (both devices over serial)
+devices/multidevice/build/install/multidevice/bin/multidevice \
+  --gateway-id test --bed-id test \
+  --philips-serial /tmp/philips-gateway --philips-device-id sim_philips \
+  --draeger-serial /tmp/draeger-gateway --draeger-device-id sim_draeger \
+  --stdout true
+```
+
+This is the closest simulation to the real AIR-021 setup — both devices communicating over serial ports with full protocol framing.
 
 ### With GUI
 
