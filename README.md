@@ -1,530 +1,143 @@
-# OpenICE Headless JSON Gateway — Philips + Draeger
+# CriticalInsights Medical Device Gateway
 
-- Philips IntelliVue over LAN/UDP
-- Philips IntelliVue over MIB/RS232
-- Draeger MEDIBUS over serial or TCP
-- Philips + Draeger in one combined bedside process
+A headless gateway that reads vital signs from Draeger ventilators (MEDIBUS) and Philips IntelliVue patient monitors (LAN/UDP and MIB/RS232) over RS-232 serial ports and publishes normalized JSON to stdout, files, HTTP endpoints, and a built-in web dashboard.
 
-It reuses the OpenICE protocol parsers and publishes normalized JSON to stdout, JSONL files, and/or HTTP POST endpoints.
+## What's included
+
+- **Draeger MEDIBUS driver** — serial and TCP, ICC handshake, even parity, realtime data
+- **Philips IntelliVue driver** — LAN/UDP and MIB/RS232, association negotiation, poll rate limiting
+- **Multi-device launcher** — both devices in one process on one edge gateway
+- **Auto-detect** — probes COM ports to identify which device is on which port
+- **Web dashboard** — built-in dark patient monitor UI served via SSE on a single HTTP port
+- **Compact CLI output** — one-line vital sign summaries instead of raw JSON
+- **Device simulators** — spec-compliant CLI and GUI simulators for testing without hardware
+- **Production hardening** — heartbeat monitoring, log rotation, systemd service, file permissions
+- **Runtime packaging** — 3.4MB deployable bundle (no Gradle/source needed on target)
+
+## Documentation
+
+| Document | What it covers |
+|----------|---------------|
+| **[README.md](README.md)** (this file) | Quick start, scripts, output options, deployment |
+| **[ARCHITECTURE.md](ARCHITECTURE.md)** | System diagram, data flow, protocol details, thread model, JSON schema |
+| **[HARDWARE.md](HARDWARE.md)** | Pin mappings, cable wiring (RJ-45 to DB-9), device configuration steps |
+| **[SIMULATOR.md](SIMULATOR.md)** | CLI and GUI simulators, testing without hardware, HIL testing |
+| **[FIXES_APPLIED.md](FIXES_APPLIED.md)** | All bug fixes, protocol compliance changes, and new features |
 
 ---
 
 ## Quick start
 
 ```bash
-# 1. Install JDK 17 (skip if already installed)
+# 1. Install JDK 17
 sudo apt update && sudo apt install -y openjdk-17-jdk
 
-# 2. Setup (downloads Gradle, builds, compiles test tools)
+# 2. Build everything
 ./setup.sh
 
-# 3. Test without real devices
+# 3. Test without real devices (runs a Draeger simulator for 30 seconds)
 ./test.sh
 
-# 4. Run with real devices (auto-detect COM ports)
+# 4. Simulate with the GUI monitor
+java -cp test-tools CriticalInsightsMonitor
+
+# 5. Run with real devices (auto-detect COM ports)
 ./run.sh --auto --stdout
 
-# Or specify ports manually
-./run.sh --multi --philips-serial /dev/ttyS0 --draeger-serial /dev/ttyS1 --stdout
-
-# 5. Deploy as a systemd service
+# 6. Deploy as a systemd service
 sudo bash deploy/deploy.sh
-sudo nano /etc/systemd/system/openice-multidevice.service   # edit COM ports
-sudo systemctl enable --now openice-multidevice
-sudo journalctl -u openice-multidevice -f
 ```
 
-### Script reference
+---
+
+## Script reference
 
 | Script | Purpose |
 |--------|---------|
 | `./setup.sh` | One-time setup: detects JDK, downloads Gradle, builds everything, compiles test tools |
-| `./test.sh` | Runs a fake Draeger device + gateway for 30 seconds, reports events captured |
-| `./test.sh 9100 60` | Same but on port 9100 for 60 seconds |
-| `./run.sh --auto --stdout` | Auto-detect devices on COM ports and run |
+| `./test.sh` | Automated test: runs Draeger simulator + gateway for 30 seconds (accepts `./test.sh 9100 60` for custom port/duration) |
 | `./run.sh --help` | Shows all run options with examples |
-| `./run.sh [options]` | Runs the gateway with real devices (see `--help` for modes) |
-| `java -cp test-tools MedibusSimulator --tcp 9100` | Spec-compliant Draeger MEDIBUS simulator |
-| `java -cp test-tools IntellivueSimulator` | Spec-compliant Philips IntelliVue simulator |
-| `./hil-test.sh` | HIL test: virtual serial ports with socat + fake devices (requires `socat`) |
-| `./hil-test.sh --duration 120` | HIL test for 120 seconds |
-| `sudo bash deploy/deploy.sh` | Production deployment: creates user, installs service, logrotate |
-
-See sections below for detailed options and configuration.
-
-
-
-## Device prerequisites
-
-Before connecting, ensure the following settings on the physical devices:
-
-**Philips MX800 (MIB/RS232):**
-- Go to Configuration > Network > MIB/RS232 and enable data export
-- Serial settings are fixed at 115200 baud, 8N1, no flow control (set automatically by the driver)
-- Use a straight-through RS-232 cable (not null-modem)
-
-**Draeger ventilator (MEDIBUS):**
-- Enable the MEDIBUS protocol on the ventilator (consult Draeger service manual)
-- Default baud rate is 19200 (adjustable with `--draeger-baud`)
-- Serial settings: 8 data bits, no parity, 1 stop bit, no flow control
-
-**Advantech AIR-021 (or other edge gateway):**
-- Identify your COM ports: `dmesg | grep tty` (typically `/dev/ttyS0` and `/dev/ttyS1`)
-- Ensure your user has serial access: `sudo usermod -aG dialout $USER`
-- Use JDK 17: `export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64`
+| `./run.sh --auto --stdout` | Auto-detect devices on COM ports and run |
+| `./hil-test.sh` | HIL test with virtual serial ports via `socat` (accepts `--duration 120`, `--multi`, `--loopback`) |
+| `./package.sh` | Build a distributable runtime package (~3.4 MB) |
+| `sudo bash deploy/deploy.sh` | Production deployment: creates service user, installs systemd service and logrotate |
 
 ---
 
-## Directory layout
+## Output options
 
-```text
-openice-headless-json-gateway-patched/
-  settings.gradle
-  build.gradle
-  gradlew
-  gradle/wrapper/
+All launchers share these output flags:
 
-  devices/
-    common/
-    philips/
-    draeger/
-    multidevice/
+| Flag | Description |
+|------|-------------|
+| `--stdout true` | Print JSON events to stdout (enabled by default if no file/HTTP sink is set) |
+| `--stdout compact` | Print a compact one-line summary per second instead of raw JSON |
+| `--jsonl <path>` | Append JSON events to a JSONL file |
+| `--dead-letter-jsonl <path>` | Write events that fail all publish attempts to a dead-letter file |
+| `--http-url <url>` | POST JSON events to an HTTP endpoint (HTTPS required unless `--allow-insecure-http true`) |
+| `--http-header 'Name: value'` | Add HTTP headers (repeatable, e.g. `--http-header 'Authorization: Bearer TOKEN'`) |
+| `--web-port <port>` | Start the built-in web dashboard on this port |
+| `--queue-capacity <n>` | Internal publish queue size (default 10,000) |
+| `--publish-attempts <n>` | Max retry attempts per event (default 5) |
+| `--reconnect-ms <ms>` | Reconnection delay after device disconnect (default 5000) |
 
-  interop-lab/
-    purejavacomm/
-    demo-purejavacomm/
-```
-
-This is a no-GUI package. Do not use the original OpenICE demo-app entry point:
-
-```bash
-./gradlew :interop-lab:demo-apps:run
-```
-
-Use the headless modules below instead.
+When `--jsonl` or `--http-url` is set, stdout is disabled unless you explicitly pass `--stdout true` or `--stdout compact`.
 
 ---
 
-## Java requirement
+## Running with simulators
 
-Use JDK 17.
-
-Ubuntu x86_64:
+### CLI simulators
 
 ```bash
-sudo apt update
-sudo apt install openjdk-17-jdk
-export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-export PATH=$JAVA_HOME/bin:$PATH
-```
+# Terminal 1 -- Draeger simulator
+java -cp test-tools MedibusSimulatorV2 --tcp 9100
 
-Jetson ARM64:
+# Terminal 2 -- connect gateway
+./run.sh --draeger-tcp 127.0.0.1:9100 --stdout
+```
 
 ```bash
-sudo apt update
-sudo apt install openjdk-17-jdk
-export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-arm64
-export PATH=$JAVA_HOME/bin:$PATH
+# Terminal 1 -- Philips simulator
+java -cp test-tools IntellivueSimulatorV2 --port 24105
+
+# Terminal 2 -- connect gateway
+./run.sh --philips-host 127.0.0.1 --stdout
 ```
 
-Verify:
+### GUI simulator (CriticalInsightsMonitor)
+
+The primary GUI provides a dark patient-monitor interface with real-time waveforms, adjustable sliders, alarm triggers, and clinical scenarios.
 
 ```bash
-java -version
-javac -version
+java -cp test-tools CriticalInsightsMonitor
 ```
 
-Expected major version: Java 17.
-
-If Gradle was previously run using a newer Java version:
+Then connect the gateway to both simulators:
 
 ```bash
-./gradlew --stop
-rm -rf ~/.gradle/caches/7.6/scripts
+./run.sh --multi --philips-host 127.0.0.1 --draeger-tcp 127.0.0.1:9100 --stdout
 ```
+
+See [SIMULATOR.md](SIMULATOR.md) for the full simulator reference.
 
 ---
 
-## Build
+## Running with real devices
 
-From the package root:
-
-```bash
-cd openice-headless-json-gateway-patched
-```
-
-Compile everything:
-
-```bash
-./gradlew clean build
-```
-
-Build runnable distributions:
-
-```bash
-./gradlew :devices:philips:installDist
-./gradlew :devices:draeger:installDist
-./gradlew :devices:multidevice:installDist
-```
-
-Generated launchers:
-
-```text
-devices/philips/build/install/philips/bin/philips
-devices/philips/build/install/philips/bin/philips-serial
-devices/draeger/build/install/draeger/bin/draeger
-devices/multidevice/build/install/multidevice/bin/multidevice
-```
-
-For quick development runs without installing distributions:
-
-```bash
-./gradlew :devices:philips:runHeadlessPhilips --args="--help"
-./gradlew :devices:philips:runHeadlessPhilipsSerial --args="--help"
-./gradlew :devices:draeger:runHeadlessDraeger --args="--help"
-./gradlew :devices:multidevice:runHeadlessMultiDevice --args="--help"
-```
-
----
-
-## Shared output options
-
-All launchers support these common output options:
-
-```text
---stdout true|false
---jsonl <path>
---dead-letter-jsonl <path>
---http-url <url>
---http-header 'Name: value'
---http-timeout-ms <milliseconds>
---queue-capacity <count>
---publish-attempts <count>
---publish-retry-backoff-ms <milliseconds>
---shutdown-drain-timeout-ms <milliseconds>
---reconnect-ms <milliseconds>
-```
-
-Behavior:
-
-- If no `--jsonl` and no `--http-url` are provided, stdout JSON is enabled by default.
-- If `--jsonl` or `--http-url` is provided, stdout is disabled unless you explicitly pass `--stdout true`.
-- HTTP failures are retried by the queued publisher.
-- After all publish attempts fail, the event is written to `--dead-letter-jsonl` if configured.
-- If no dead-letter file is configured, the event is dropped after retries and an error is logged.
-
-Example HTTP auth header:
-
-```bash
---http-header 'Authorization: Bearer YOUR_TOKEN'
-```
-
-Multiple headers are allowed:
-
-```bash
---http-header 'Authorization: Bearer YOUR_TOKEN' \
---http-header 'X-Gateway-ID: jetson_nicu_01'
-```
-
----
-
-## Philips over LAN/UDP
-
-Use when the Philips IntelliVue monitor is reachable by IP.
-
-Development run:
-
-```bash
-./gradlew :devices:philips:runHeadlessPhilips --args="\
-  --host 192.168.10.50 \
-  --gateway-id jetson_nicu_01 \
-  --bed-id bed_12 \
-  --device-id philips_monitor_01 \
-  --jsonl /var/log/openice/philips-events.jsonl \
-  --dead-letter-jsonl /var/log/openice/philips-dead-letter.jsonl \
-  --stdout true"
-```
-
-Installed launcher:
-
-```bash
-devices/philips/build/install/philips/bin/philips \
-  --host 192.168.10.50 \
-  --gateway-id jetson_nicu_01 \
-  --bed-id bed_12 \
-  --device-id philips_monitor_01 \
-  --jsonl /var/log/openice/philips-events.jsonl \
-  --dead-letter-jsonl /var/log/openice/philips-dead-letter.jsonl
-```
-
-Important Philips LAN/UDP options:
-
-```text
---host <monitor-ip>          required
---port <port>                default: Philips IntelliVue default unicast port
---local-port <port>          default: Philips IntelliVue default unicast port
-```
-
-`--host` is required. The app intentionally refuses to default to localhost for a bedside gateway.
-
----
-
-## Philips over MIB/RS232
-
-Use when the Philips monitor is connected through MIB/RS232, usually through a USB serial adapter.
-
-Typical Linux serial paths:
-
-```text
-/dev/ttyUSB0
-/dev/ttyS0
-/dev/philips_monitor_01     recommended stable udev symlink
-```
-
-Development run:
-
-```bash
-./gradlew :devices:philips:runHeadlessPhilipsSerial --args="\
-  --serial /dev/philips_monitor_01 \
-  --gateway-id jetson_nicu_01 \
-  --bed-id bed_12 \
-  --device-id philips_monitor_01 \
-  --jsonl /var/log/openice/philips-events.jsonl \
-  --dead-letter-jsonl /var/log/openice/philips-dead-letter.jsonl"
-```
-
-Installed launcher:
-
-```bash
-devices/philips/build/install/philips/bin/philips-serial \
-  --serial /dev/philips_monitor_01 \
-  --gateway-id jetson_nicu_01 \
-  --bed-id bed_12 \
-  --device-id philips_monitor_01 \
-  --jsonl /var/log/openice/philips-events.jsonl \
-  --dead-letter-jsonl /var/log/openice/philips-dead-letter.jsonl
-```
-
-Philips MIB/RS232 settings are fixed by the OpenICE `RS232Adapter`:
-
-```text
-115200 baud, 8 data bits, no parity, 1 stop bit, no flow control
-```
-
-The serial launcher now fully rebuilds the serial bridge and loopback UDP parser path after failure.
-
----
-
-## Draeger MEDIBUS
-
-Draeger can run over serial or TCP.
-
-Serial development run:
-
-```bash
-./gradlew :devices:draeger:runHeadlessDraeger --args="\
-  --serial /dev/draeger_vent_01 \
-  --serial-baud 19200 \
-  --gateway-id jetson_nicu_01 \
-  --bed-id bed_12 \
-  --device-id draeger_vent_01 \
-  --jsonl /var/log/openice/draeger-events.jsonl \
-  --dead-letter-jsonl /var/log/openice/draeger-dead-letter.jsonl"
-```
-
-TCP development run:
-
-```bash
-./gradlew :devices:draeger:runHeadlessDraeger --args="\
-  --tcp-host 192.168.10.60 \
-  --tcp-port 4001 \
-  --gateway-id jetson_nicu_01 \
-  --bed-id bed_12 \
-  --device-id draeger_vent_01 \
-  --jsonl /var/log/openice/draeger-events.jsonl"
-```
-
-Installed launcher:
-
-```bash
-devices/draeger/build/install/draeger/bin/draeger \
-  --serial /dev/draeger_vent_01 \
-  --serial-baud 19200 \
-  --gateway-id jetson_nicu_01 \
-  --bed-id bed_12 \
-  --device-id draeger_vent_01 \
-  --jsonl /var/log/openice/draeger-events.jsonl
-```
-
-Important Draeger options:
-
-```text
---serial <device>              serial mode
---serial-baud <baud>           default: 19200
---tcp-host <ip> --tcp-port <p> TCP mode
---poll-ms <milliseconds>       default: 1000
-```
-
-Choose either serial or TCP, not both.
-
-Draeger JSON now includes `unit` and `unitCode` when a safe metric-name heuristic can infer the unit. Unknown units are emitted as `null` rather than guessed aggressively.
-
----
-
-## Philips + Draeger together
-
-Use the multidevice launcher when one Jetson/edge box should run both device adapters into one shared queue/publisher.
-
-Philips LAN/UDP + Draeger serial:
-
-```bash
-./gradlew :devices:multidevice:runHeadlessMultiDevice --args="\
-  --gateway-id jetson_nicu_01 \
-  --bed-id bed_12 \
-  --philips-host 192.168.10.50 \
-  --philips-device-id philips_monitor_01 \
-  --draeger-serial /dev/draeger_vent_01 \
-  --draeger-device-id draeger_vent_01 \
-  --jsonl /var/log/openice/bed12-events.jsonl \
-  --dead-letter-jsonl /var/log/openice/bed12-dead-letter.jsonl \
-  --http-url https://hospital.example/api/events \
-  --stdout true"
-```
-
-Philips MIB/RS232 + Draeger serial:
-
-```bash
-./gradlew :devices:multidevice:runHeadlessMultiDevice --args="\
-  --gateway-id jetson_nicu_01 \
-  --bed-id bed_12 \
-  --philips-serial /dev/philips_monitor_01 \
-  --philips-device-id philips_monitor_01 \
-  --draeger-serial /dev/draeger_vent_01 \
-  --draeger-device-id draeger_vent_01 \
-  --jsonl /var/log/openice/bed12-events.jsonl \
-  --dead-letter-jsonl /var/log/openice/bed12-dead-letter.jsonl"
-```
-
-Installed launcher:
-
-```bash
-devices/multidevice/build/install/multidevice/bin/multidevice \
-  --gateway-id jetson_nicu_01 \
-  --bed-id bed_12 \
-  --philips-serial /dev/philips_monitor_01 \
-  --philips-device-id philips_monitor_01 \
-  --draeger-serial /dev/draeger_vent_01 \
-  --draeger-device-id draeger_vent_01 \
-  --jsonl /var/log/openice/bed12-events.jsonl \
-  --dead-letter-jsonl /var/log/openice/bed12-dead-letter.jsonl
-```
-
-Multidevice Philips options:
-
-```text
---philips-host <ip>          Philips LAN/UDP mode
---philips-serial <device>    Philips MIB/RS232 mode
---philips-port <port>
---philips-local-port <port>
---philips-device-id <id>
-```
-
-Choose only one Philips transport: `--philips-host` or `--philips-serial`.
-
-Multidevice Draeger options:
-
-```text
---draeger-serial <device>
---draeger-device-id <id>
---draeger-baud <baud>        default: 19200
---draeger-poll-ms <ms>       default: 1000
-```
-
----
-
-## Production deployment
-
-### Automated deployment
-
-The simplest way to deploy is with the included script:
-
-```bash
-sudo bash deploy/deploy.sh
-```
-
-This script:
-
-1. Checks for JDK 17
-2. Creates the `openice` service user with `dialout` group access
-3. Creates `/var/log/openice/` with restricted permissions
-4. Downloads Gradle 7.6 if needed and builds the project
-5. Installs to `/opt/openice-headless/`
-6. Installs logrotate and systemd configs
-
-After deployment, edit the service file to match your COM ports and device IDs, then start:
-
-```bash
-sudo nano /etc/systemd/system/openice-multidevice.service
-sudo systemctl daemon-reload
-sudo systemctl enable openice-multidevice
-sudo systemctl start openice-multidevice
-```
-
-### Manual deployment
-
-Create a service user and log directory:
-
-```bash
-sudo useradd --system --no-create-home --shell /usr/sbin/nologin openice || true
-sudo usermod -aG dialout openice
-sudo mkdir -p /opt/openice-headless /var/log/openice
-sudo chown openice:openice /var/log/openice
-sudo chmod 750 /var/log/openice
-```
-
-Copy this package to `/opt/openice-headless`, build it, then install the service and logrotate config:
-
-```bash
-sudo cp openice-multidevice.service /etc/systemd/system/
-sudo cp deploy/logrotate-openice /etc/logrotate.d/openice
-```
-
-### Advantech AIR-021 setup
-
-The AIR-021 has two built-in RS-232 COM ports, typically `/dev/ttyS0` and `/dev/ttyS1`.
-
-**Auto-detect (recommended)** — no need to know which cable goes where:
+### Auto-detect COM ports (recommended)
 
 ```bash
 ./run.sh --auto --jsonl /var/log/openice/bed01.jsonl --stdout
 ```
 
-This probes each port automatically:
-1. Sends a MEDIBUS request at 19200 baud — the port that responds is **Draeger**
-2. Checks remaining ports at 115200 baud for data — that's **Philips**
-3. Launches the correct gateway mode
-
-You can also run detection standalone to see what's connected:
+The auto-detect probes each port: sends a MEDIBUS request at 19200 baud (Draeger responds), then checks remaining ports at 115200 baud for data (Philips). You can also run detection standalone:
 
 ```bash
 java -cp test-tools PortDetector
 ```
 
-Output:
-```
-Scanning 4 port(s): [/dev/ttyS0, /dev/ttyS1, /dev/ttyS2, /dev/ttyS3]
-
-  /dev/ttyS0 ... no MEDIBUS response
-  /dev/ttyS1 ... DRAEGER (MEDIBUS response detected)
-  /dev/ttyS2 ... SKIP (cannot open)
-  /dev/ttyS3 ... SKIP (cannot open)
-  /dev/ttyS0 (115200 probe) ... PHILIPS (data at 115200 baud)
-
-DRAEGER=/dev/ttyS1
-PHILIPS=/dev/ttyS0
-```
-
-**Manual port selection** — if you know which port is which:
+### Manual port selection
 
 ```bash
 ./run.sh --multi \
@@ -533,41 +146,81 @@ PHILIPS=/dev/ttyS0
   --jsonl /var/log/openice/bed01.jsonl --stdout
 ```
 
-The AIR-021 runs x86_64 Linux, so use:
+### AIR-021 setup
+
+The Advantech AIR-021 has two built-in RS-232 COM ports, typically `/dev/ttyS0` and `/dev/ttyS1`.
 
 ```bash
+# Identify ports
+dmesg | grep tty
+
+# Ensure serial access
+sudo usermod -aG dialout $USER
+
+# Set JDK
 export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 ```
 
-### Systemd service (hardened)
+See [HARDWARE.md](HARDWARE.md) for cable wiring, pin mappings, and device configuration steps.
 
-The included `openice-multidevice.service` has security hardening enabled:
+---
 
-- `ProtectSystem=strict` — filesystem is read-only except `/var/log/openice`
-- `ProtectHome=yes`, `PrivateTmp=yes`, `NoNewPrivileges=yes` — sandboxing
-- `DeviceAllow=/dev/ttyS0 rw`, `DeviceAllow=/dev/ttyS1 rw` — only the two serial ports are accessible
-- `MemoryMax=512M`, `TasksMax=64` — resource limits
-- `WatchdogSec=120` — systemd restarts the process if it hangs for 2 minutes
-- `Restart=always`, `RestartSec=5` — auto-restart on crash
+## Web dashboard
 
-Edit the `DeviceAllow` lines if your serial ports are different (e.g. `/dev/ttyUSB0`).
-
-Enable and start:
+Start the gateway with `--web-port` to serve a built-in patient monitor dashboard:
 
 ```bash
+./run.sh --auto --stdout --web-port 8080
+```
+
+Then open `http://localhost:8080` in a browser. The dashboard uses Server-Sent Events (SSE) on the same HTTP port -- no WebSocket or additional ports needed.
+
+Endpoints:
+
+| Path | Description |
+|------|-------------|
+| `GET /` | HTML dashboard page (dark patient monitor UI) |
+| `GET /events` | SSE stream of JSON vital sign events |
+| `GET /api/latest` | Most recent event as JSON |
+
+Works with both real devices and simulators.
+
+---
+
+## Production deployment
+
+### Automated deployment
+
+```bash
+sudo bash deploy/deploy.sh
+```
+
+This script checks for JDK 17, creates an `openice` service user with `dialout` group access, builds the project, installs to `/opt/openice-headless/`, and configures logrotate and systemd.
+
+After deployment, edit the service file for your COM ports and start:
+
+```bash
+sudo nano /etc/systemd/system/openice-multidevice.service
 sudo systemctl daemon-reload
-sudo systemctl enable openice-multidevice
-sudo systemctl start openice-multidevice
+sudo systemctl enable --now openice-multidevice
 sudo journalctl -u openice-multidevice -f
 ```
+
+### Packaging for transfer
+
+```bash
+./package.sh
+```
+
+Produces a ~3.4 MB archive that can be copied to target machines.
 
 ---
 
 ## Monitoring
 
-### Heartbeat logging
+### Heartbeat
 
-The multi-device gateway logs a `HEARTBEAT` line to stderr every 60 seconds:
+The gateway logs a `HEARTBEAT` line to stderr every 60 seconds:
 
 ```
 HEARTBEAT | threads: draeger-medibus-supervisor=alive philips-mib-rs232-supervisor=alive | devices: draeger_vent_01=connected(last_data=3s_ago) philips_mx800_01=connected(last_data=1s_ago)
@@ -580,387 +233,46 @@ DEVICE_STATE draeger_vent_01: connected
 DEVICE_STATE philips_mx800_01: disconnected
 ```
 
-View live logs:
-
-```bash
-sudo journalctl -u openice-multidevice -f
-```
-
-Filter for heartbeats or state changes:
-
-```bash
-sudo journalctl -u openice-multidevice | grep HEARTBEAT
-sudo journalctl -u openice-multidevice | grep DEVICE_STATE
-```
-
 ### What to watch for
 
-- `last_data` growing beyond a few seconds: the device may be powered off or the cable disconnected
-- Thread state `DEAD`: a supervisor thread has exited unexpectedly
+- `last_data` growing beyond a few seconds: device may be off or cable disconnected
+- Thread state `DEAD`: a supervisor thread exited unexpectedly
 - `DEVICE_STATE ... disconnected` without a subsequent `connected`: check the physical connection
 
 ### Log rotation
 
-Logs are rotated daily by the included logrotate config (`deploy/logrotate-openice`):
-
-- 30 days retention
-- Compressed after 1 day
-- `copytruncate` so the running process does not need a restart
-- New files created with `0640` permissions (owner read/write, group read only)
-
-Install manually if you did not use `deploy/deploy.sh`:
+Logs are rotated daily (30-day retention, compressed after 1 day, `copytruncate`). Install manually if you did not use `deploy/deploy.sh`:
 
 ```bash
 sudo cp deploy/logrotate-openice /etc/logrotate.d/openice
 ```
 
-### File permissions
-
-JSONL output files are created with `0640` permissions (owner read/write, group read only). Patient data is not world-readable.
-
-### Service health check
-
-```bash
-sudo systemctl status openice-multidevice
-ls -la /var/log/openice/
-du -sh /var/log/openice/
-```
-
----
-
-## Stable serial-device names with udev
-
-USB serial devices can move between `/dev/ttyUSB0`, `/dev/ttyUSB1`, etc. Use udev symlinks for stable service startup.
-
-Find adapter attributes:
-
-```bash
-udevadm info -a -n /dev/ttyUSB0 | less
-```
-
-Example rule:
-
-```udev
-SUBSYSTEM=="tty", ATTRS{idVendor}=="067b", ATTRS{idProduct}=="2303", SYMLINK+="philips_monitor_01", GROUP="dialout", MODE="0660"
-```
-
-Reload rules:
-
-```bash
-sudo udevadm control --reload-rules
-sudo udevadm trigger
-```
-
-Then use:
-
-```text
-/dev/philips_monitor_01
-/dev/draeger_vent_01
-```
-
-Make sure the service user is in the `dialout` group if needed:
-
-```bash
-sudo usermod -aG dialout openice
-```
-
----
-
-## JSON shape
-
-Common fields:
-
-```json
-{
-  "gatewayId": "jetson_nicu_01",
-  "bedId": "bed_12",
-  "deviceId": "philips_monitor_01",
-  "vendor": "philips",
-  "protocol": "intellivue",
-  "eventType": "vital",
-  "timestamp": "2026-05-21T12:00:00Z"
-}
-```
-
-Philips numeric example:
-
-```json
-{
-  "eventType": "numeric",
-  "metric": "MDC_PULS_OXIM_SAT_O2",
-  "metricCode": "...",
-  "unit": "%",
-  "unitCode": "%",
-  "value": 98
-}
-```
-
-Draeger measured-data example:
-
-```json
-{
-  "eventType": "vital",
-  "vendor": "draeger",
-  "protocol": "medibus",
-  "metric": "Paw",
-  "metricCode": "Paw",
-  "unit": "cmH2O",
-  "unitCode": "cmH2O",
-  "rawValue": "12",
-  "value": 12
-}
-```
-
-If a Draeger unit cannot be inferred safely, `unit` and `unitCode` are `null`.
-
----
-
-## Testing without devices
-
-Spec-compliant device simulators are included in `test-tools/`. They produce realistic vital signs that the drivers decode as if talking to real hardware.
-
-### Compile simulators
-
-```bash
-javac test-tools/MedibusSimulator.java
-javac test-tools/IntellivueSimulator.java
-```
-
-### Draeger MEDIBUS simulator
-
-Follows the Dräger RS 232 MEDIBUS Protocol Definition (Rev 6.00). Supports ICC handshake, proper ASCII HEX checksums, measured data, alarms, device settings, text messages, and multiple device models.
-
-**Terminal 1** — start simulator:
-
-```bash
-java -cp test-tools MedibusSimulator --tcp 9100
-```
-
-**Terminal 2** — connect gateway:
-
-```bash
-./run.sh --draeger-tcp 127.0.0.1:9100 --stdout
-```
-
-**Choose a device model:**
-
-```bash
-java -cp test-tools MedibusSimulator --tcp 9100 --model evita     # Evita (default)
-java -cp test-tools MedibusSimulator --tcp 9100 --model evita4    # Evita 4
-java -cp test-tools MedibusSimulator --tcp 9100 --model v500      # Evita V500
-java -cp test-tools MedibusSimulator --tcp 9100 --model savina    # Savina
-java -cp test-tools MedibusSimulator --tcp 9100 --model fabius    # Fabius GS
-```
-
-**Simulator output:**
-
-```
-MedibusSimulator [Evita] listening on TCP port 9100
-Gateway connected from /127.0.0.1:54321
-  [1] ICC (0x51)
-       -> ICC acknowledged, communication initialized
-  [2] ReqDeviceId (0x52)
-       -> ID=8210 Name='Evita' Rev=01.00:03.00
-  [3] ReqDataCP1 (0x24)
-       -> VT=460mL RR=16 Paw=21 PEEP=5 FiO2=40%
-```
-
-**Simulated vitals:** tidal volume, respiratory rate, minute volume, peak/mean/plateau pressure, PEEP, compliance, resistance, FiO2, airway temperature, spontaneous respiratory rate.
-
-### Philips IntelliVue simulator
-
-Follows the Philips IntelliVue Data Export Interface Programming Guide (Rev G.0). Supports association handshake, MDS Create Event, poll results with FLOAT-Type numerics, and proper big-endian encoding.
-
-**Terminal 1** — start simulator:
-
-```bash
-java -cp test-tools IntellivueSimulator --port 24105
-```
-
-**Terminal 2** — connect gateway:
-
-```bash
-./run.sh --philips-host 127.0.0.1 --stdout
-```
-
-**Simulator output:**
-
-```
-IntellivueSimulator listening on UDP port 24105
-  <- Association Request from /127.0.0.1:24105
-  -> Association Response (accepted)
-  -> MDS Create Event
-  <- Poll Request #1 (extended)
-  -> Poll Result: HR=72 SpO2=97 RR=16 ABP=120/80 etCO2=38
-```
-
-**Simulated vitals:** heart rate, SpO2, pulse rate, respiratory rate, ABP (sys/dia/mean), NBP (sys/dia/mean), end-tidal CO2, blood temperature.
-
-### Both simulators together
-
-```bash
-# Terminal 1 — Draeger simulator
-java -cp test-tools MedibusSimulator --tcp 9100
-
-# Terminal 2 — Philips simulator
-java -cp test-tools IntellivueSimulator --port 24105
-
-# Terminal 3 — gateway receives data from both
-devices/multidevice/build/install/multidevice/bin/multidevice \
-  --gateway-id test --bed-id test \
-  --philips-host 127.0.0.1 --philips-device-id sim_philips \
-  --draeger-serial NONE \
-  --stdout true
-```
-
-### Save simulator output to file
-
-```bash
-./run.sh --draeger-tcp 127.0.0.1:9100 --jsonl /tmp/draeger-sim.jsonl --stdout
-```
-
-### Quick test (automated)
-
-The `test.sh` script runs the basic Draeger simulator and gateway together automatically:
-
-```bash
-./test.sh              # 30 seconds
-./test.sh 9100 60      # 60 seconds on port 9100
-```
-
----
-
-## HIL (Hardware-in-the-Loop) testing
-
-HIL testing uses virtual serial ports to simulate real RS-232 connections. This tests the full serial path — port open/close, MEDIBUS framing, data parsing, reconnection — without needing physical devices.
-
-### Prerequisites
-
-```bash
-sudo apt install socat
-```
-
-### Run HIL test
-
-```bash
-# Draeger only (default, 30 seconds)
-./hil-test.sh
-
-# Longer test
-./hil-test.sh --duration 120
-
-# Both devices (Philips placeholder + Draeger)
-./hil-test.sh --multi
-
-# With real loopback cables on COM ports
-./hil-test.sh --loopback
-```
-
-### How it works
-
-```
-┌──────────────────┐     socat PTY pair     ┌──────────────────┐
-│ FakeDraegerSerial │ ←──── /dev/pts/X ────→ │  Gateway         │
-│ (simulator)       │      /dev/pts/Y        │  (--serial mode) │
-└──────────────────┘     virtual RS-232      └──────────────────┘
-```
-
-1. `socat` creates a virtual serial port pair (two linked PTYs)
-2. The simulator (`FakeDraegerSerial`) opens one end and sends MEDIBUS responses
-3. The gateway opens the other end with `--serial` and polls for data
-4. JSON events are captured to `/tmp/hil-test-output.jsonl`
-5. Results are reported at the end (total events, vitals, errors)
-
-### Manual HIL setup
-
-For more control, run each component separately:
-
-**Terminal 1** — create virtual serial pair:
-```bash
-socat -d -d \
-  pty,raw,echo=0,link=/tmp/draeger-device \
-  pty,raw,echo=0,link=/tmp/draeger-gateway
-```
-
-**Terminal 2** — start simulator:
-```bash
-java -cp test-tools FakeDraegerSerial /tmp/draeger-device
-```
-
-**Terminal 3** — start gateway:
-```bash
-./run.sh --draeger-serial /tmp/draeger-gateway --stdout
-```
-
-### What HIL testing verifies
-
-- Serial port open/close lifecycle
-- MEDIBUS protocol framing over real serial byte streams (not TCP)
-- Data parsing and JSON output
-- Gateway reconnection when the simulator is killed and restarted
-- Serial baud rate and port configuration
+JSONL output files are created with `0640` permissions (not world-readable).
 
 ---
 
 ## Troubleshooting
 
-### `installDist` not found
-
-Use this updated package. The runnable modules now apply Gradle's `application` plugin.
-
-Build distributions with:
-
+**Permission denied on serial port:**
 ```bash
-./gradlew :devices:philips:installDist :devices:draeger:installDist :devices:multidevice:installDist
+sudo usermod -aG dialout $USER   # then log out/in
 ```
 
-### No logs appear
+**No data from Draeger:**
+Check serial path, baud rate (default 19200), that MEDIBUS is enabled on the ventilator, and that the service user has serial permissions.
 
-This package includes `slf4j-simple`. You should see log output on stderr/stdout. For more verbose logs, set JVM/system properties as needed.
+**Philips reconnects repeatedly:**
+Verify correct monitor IP or serial path, firewall/VLAN settings, cable type (straight-through for Philips, null-modem for Draeger), and that MIB/RS232 is enabled on the monitor.
 
-### Permission denied on `/dev/ttyUSB0`
+**HTTP endpoint failures:**
+Events are retried automatically. Configure `--dead-letter-jsonl` so failed events are not silently lost.
 
-Add your user or service user to `dialout`:
+**`installDist` not found:**
+Run `./setup.sh` first or build with `./gradlew :devices:multidevice:installDist`.
 
+**Gradle version mismatch:**
 ```bash
-sudo usermod -aG dialout $USER
-sudo usermod -aG dialout openice
+./gradlew --stop
+rm -rf ~/.gradle/caches/7.6/scripts
+./gradlew clean build
 ```
-
-Log out/in or restart the service.
-
-### HTTP endpoint is down
-
-The queued publisher retries failed publishes. Configure a dead-letter file so failed events are not silently lost:
-
-```bash
---dead-letter-jsonl /var/log/openice/dead-letter.jsonl
-```
-
-### Philips reconnects repeatedly
-
-Check:
-
-- correct monitor IP or serial path
-- firewall/network VLAN
-- serial cable and USB adapter
-- Philips MIB/RS232 physical connection
-- local port conflict if using LAN/UDP
-
-### Draeger has no data
-
-Check:
-
-- correct serial path
-- baud rate, usually `19200`
-- MEDIBUS protocol enabled on the ventilator
-- service user has serial permissions
-- poll interval is not too aggressive
-
----
-
-## Notes on `demo-purejavacomm`
-
-This package avoids the original OpenICE GUI/demo app, but still keeps `interop-lab:demo-purejavacomm` because the serial-provider implementation is reused by the headless serial launchers.
-
-So “no demo app” means no GUI/demo runtime path, not removal of every source folder with `demo` in its name.
