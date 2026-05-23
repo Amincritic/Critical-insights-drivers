@@ -155,6 +155,7 @@ public final class WebDashboardPublisher implements JsonPublisher {
         while (running.get()) {
             try {
                 Socket client = wsServerSocket.accept();
+                log.info("WebSocket client connecting from " + client.getRemoteSocketAddress());
                 Thread handler = new Thread(() -> handleWsClient(client), "ws-client-" + client.getRemoteSocketAddress());
                 handler.setDaemon(true);
                 handler.start();
@@ -205,6 +206,7 @@ public final class WebDashboardPublisher implements JsonPublisher {
 
             // Register client
             clients.put(socket, out);
+            log.info("WebSocket client connected: " + socket.getRemoteSocketAddress());
 
             // Send buffered recent events
             for (String evt : recentEvents) {
@@ -526,7 +528,10 @@ resize();
 var ws = null;
 function connect(){
   var host = window.location.hostname || 'localhost';
-  ws = new WebSocket('ws://'+host+':'+WS_PORT);
+  if(host === '' || host === '0.0.0.0') host = 'localhost';
+  var url = 'ws://'+host+':'+WS_PORT;
+  console.log('WebSocket connecting to: '+url);
+  ws = new WebSocket(url);
   ws.onopen=function(){
     connected=true;
     connDot.className='dot on';connText.textContent='Connected';
