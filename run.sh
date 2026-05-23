@@ -131,7 +131,10 @@ while [ $# -gt 0 ]; do
         --bed-id) BED_ID="$2"; shift 2 ;;
         --device-id) DRAEGER_DEVICE_ID="$2"; PHILIPS_DEVICE_ID="$2"; shift 2 ;;
         --jsonl) JSONL="$2"; shift 2 ;;
-        --stdout) STDOUT_FLAG="true"; shift ;;
+        --stdout)
+            if [ "${2:-}" = "compact" ]; then STDOUT_FLAG="compact"; shift 2;
+            else STDOUT_FLAG="true"; shift; fi ;;
+
         --http-url) HTTP_URL="$2"; shift 2 ;;
         --http-header) HTTP_HEADERS+=("$2"); shift 2 ;;
         *) EXTRA_ARGS+=("$1"); shift ;;
@@ -141,7 +144,7 @@ done
 # Build common output args
 OUTPUT_ARGS=()
 if [ -n "$JSONL" ]; then OUTPUT_ARGS+=(--jsonl "$JSONL"); fi
-if [ -n "$STDOUT_FLAG" ]; then OUTPUT_ARGS+=(--stdout true); fi
+if [ -n "$STDOUT_FLAG" ]; then OUTPUT_ARGS+=(--stdout "$STDOUT_FLAG"); fi
 if [ -n "$HTTP_URL" ]; then OUTPUT_ARGS+=(--http-url "$HTTP_URL"); fi
 for h in "${HTTP_HEADERS[@]+"${HTTP_HEADERS[@]}"}"; do
     OUTPUT_ARGS+=(--http-header "$h")
