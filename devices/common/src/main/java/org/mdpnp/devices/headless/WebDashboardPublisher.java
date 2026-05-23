@@ -66,8 +66,10 @@ public final class WebDashboardPublisher implements JsonPublisher {
         httpServer.start();
         log.info("WebDashboard HTTP server started on port " + httpPort);
 
-        // --- WebSocket Server ---
-        wsServerSocket = new ServerSocket(wsPort);
+        // --- WebSocket Server --- bind to all interfaces (IPv4 + IPv6)
+        wsServerSocket = new ServerSocket();
+        wsServerSocket.setReuseAddress(true);
+        wsServerSocket.bind(new InetSocketAddress(wsPort));
         wsAcceptThread = new Thread(this::acceptLoop, "ws-accept");
         wsAcceptThread.setDaemon(true);
         wsAcceptThread.start();
@@ -174,21 +176,24 @@ public final class WebDashboardPublisher implements JsonPublisher {
             InputStream in = socket.getInputStream();
             OutputStream out = socket.getOutputStream();
 
-            // Read HTTP upgrade request
+            // Read HTTP upgrade request — look for \r\n\r\n end marker
             StringBuilder request = new StringBuilder();
-            int prev = 0, curr;
+            int curr;
             while ((curr = in.read()) != -1) {
                 request.append((char) curr);
-                if (prev == '\r' && curr == '\n' && request.length() >= 4 &&
-                    request.charAt(request.length() - 4) == '\r' && request.charAt(request.length() - 3) == '\n') {
+                int len = request.length();
+                if (len >= 4 &&
+                    request.charAt(len - 4) == '\r' && request.charAt(len - 3) == '\n' &&
+                    request.charAt(len - 2) == '\r' && request.charAt(len - 1) == '\n') {
                     break;
                 }
-                prev = curr;
             }
 
             String req = request.toString();
+            log.info("WebSocket handshake request:\n" + req.substring(0, Math.min(req.length(), 200)));
             String wsKey = extractHeader(req, "Sec-WebSocket-Key");
             if (wsKey == null) {
+                log.warning("WebSocket handshake failed: no Sec-WebSocket-Key header");
                 socket.close();
                 return;
             }
