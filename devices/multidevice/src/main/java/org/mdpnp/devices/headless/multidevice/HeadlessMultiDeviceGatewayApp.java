@@ -20,6 +20,7 @@ import org.mdpnp.devices.draeger.medibus.HeadlessDraegerMedibus;
 import org.mdpnp.devices.draeger.medibus.types.Command;
 import org.mdpnp.devices.headless.FileJsonPublisher;
 import org.mdpnp.devices.headless.HttpJsonPublisher;
+import org.mdpnp.devices.headless.CompactStdoutPublisher;
 import org.mdpnp.devices.headless.MultiJsonPublisher;
 import org.mdpnp.devices.headless.WebDashboardPublisher;
 import org.mdpnp.devices.headless.QueuedJsonPublisher;
@@ -91,7 +92,7 @@ public final class HeadlessMultiDeviceGatewayApp {
             throw new IllegalArgumentException("Enable at least one device: --philips-host, --philips-serial, or --draeger-serial");
         }
 
-        MultiJsonPublisher sinks = buildSinks(a.stdout, a.jsonl, a.httpUrl, a.httpTimeoutMs, a.httpHeaders, a.allowInsecureHttp, a.webPort);
+        MultiJsonPublisher sinks = buildSinks(a.stdout, a.jsonl, a.httpUrl, a.httpTimeoutMs, a.httpHeaders, a.allowInsecureHttp, a.webPort, a.stdoutMode);
         final QueuedJsonPublisher queue = buildQueue(sinks, a);
         final AtomicBoolean running = new AtomicBoolean(true);
         final List<Thread> deviceThreads = new ArrayList<Thread>();
@@ -120,10 +121,16 @@ public final class HeadlessMultiDeviceGatewayApp {
         }
     }
 
-    private static MultiJsonPublisher buildSinks(Boolean stdout, String jsonl, String httpUrl, int httpTimeoutMs, Map<String, String> headers, boolean allowInsecureHttp, int webPort) throws Exception {
+    private static MultiJsonPublisher buildSinks(Boolean stdout, String jsonl, String httpUrl, int httpTimeoutMs, Map<String, String> headers, boolean allowInsecureHttp, int webPort, String stdoutMode) throws Exception {
         MultiJsonPublisher sinks = new MultiJsonPublisher();
         boolean enableStdout = stdout != null ? stdout.booleanValue() : (jsonl == null && httpUrl == null && webPort <= 0);
-        if (enableStdout) { sinks.add(new StdoutJsonPublisher()); }
+        if (enableStdout) {
+            if ("compact".equalsIgnoreCase(stdoutMode)) {
+                sinks.add(new CompactStdoutPublisher());
+            } else {
+                sinks.add(new StdoutJsonPublisher());
+            }
+        }
         if (jsonl != null) { sinks.add(new FileJsonPublisher(Paths.get(jsonl))); }
         if (httpUrl != null) { sinks.add(new HttpJsonPublisher(httpUrl, httpTimeoutMs, headers, allowInsecureHttp)); }
         if (webPort > 0) {
@@ -337,6 +344,7 @@ public final class HeadlessMultiDeviceGatewayApp {
         int draegerBaud = 19200;
         Parity draegerParity = Parity.Even;
         int webPort = 0;
+        String stdoutMode = "json";
 
         static Args parse(String[] args) {
             Args a = new Args();
@@ -357,7 +365,12 @@ public final class HeadlessMultiDeviceGatewayApp {
                 else if ("--shutdown-drain-timeout-ms".equals(k)) { a.shutdownDrainTimeoutMs = Long.parseLong(required(k, v)); i++; }
                 else if ("--reconnect-ms".equals(k)) { a.reconnectMs = Long.parseLong(required(k, v)); i++; }
                 else if ("--connect-timeout-ms".equals(k)) { a.connectTimeoutMs = Long.parseLong(required(k, v)); i++; }
-                else if ("--stdout".equals(k)) { a.stdout = Boolean.valueOf(required(k, v)); i++; }
+                else if ("--stdout".equals(k)) {
+                    String sv = required(k, v);
+                    if ("compact".equalsIgnoreCase(sv)) { a.stdout = true; a.stdoutMode = "compact"; }
+                    else { a.stdout = Boolean.valueOf(sv); }
+                    i++;
+                }
                 else if ("--philips-host".equals(k)) { a.philipsHost = required(k, v); i++; }
                 else if ("--philips-serial".equals(k)) { a.philipsSerial = required(k, v); i++; }
                 else if ("--philips-port".equals(k)) { a.philipsPort = Integer.parseInt(required(k, v)); i++; }

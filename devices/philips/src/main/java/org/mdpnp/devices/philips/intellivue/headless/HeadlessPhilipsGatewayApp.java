@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.mdpnp.devices.headless.FileJsonPublisher;
 import org.mdpnp.devices.headless.HttpJsonPublisher;
+import org.mdpnp.devices.headless.CompactStdoutPublisher;
 import org.mdpnp.devices.headless.MultiJsonPublisher;
 import org.mdpnp.devices.headless.WebDashboardPublisher;
 import org.mdpnp.devices.headless.QueuedJsonPublisher;
@@ -22,7 +23,7 @@ public final class HeadlessPhilipsGatewayApp {
 
     public static void main(String[] args) throws Exception {
         final Args a = Args.parse(args);
-        final MultiJsonPublisher sinks = buildSinks(a.stdout, a.jsonl, a.httpUrl, a.httpTimeoutMs, a.httpHeaders, a.allowInsecureHttp, a.webPort);
+        final MultiJsonPublisher sinks = buildSinks(a.stdout, a.jsonl, a.httpUrl, a.httpTimeoutMs, a.httpHeaders, a.allowInsecureHttp, a.webPort, a.stdoutMode);
         final QueuedJsonPublisher queued = buildQueue(sinks, a);
         final AtomicBoolean running = new AtomicBoolean(true);
         queued.start();
@@ -58,10 +59,16 @@ public final class HeadlessPhilipsGatewayApp {
         }
     }
 
-    private static MultiJsonPublisher buildSinks(Boolean stdout, String jsonl, String httpUrl, int httpTimeoutMs, Map<String, String> headers, boolean allowInsecureHttp, int webPort) throws Exception {
+    private static MultiJsonPublisher buildSinks(Boolean stdout, String jsonl, String httpUrl, int httpTimeoutMs, Map<String, String> headers, boolean allowInsecureHttp, int webPort, String stdoutMode) throws Exception {
         MultiJsonPublisher sinks = new MultiJsonPublisher();
         boolean enableStdout = stdout != null ? stdout.booleanValue() : (jsonl == null && httpUrl == null && webPort <= 0);
-        if (enableStdout) { sinks.add(new StdoutJsonPublisher()); }
+        if (enableStdout) {
+            if ("compact".equalsIgnoreCase(stdoutMode)) {
+                sinks.add(new CompactStdoutPublisher());
+            } else {
+                sinks.add(new StdoutJsonPublisher());
+            }
+        }
         if (jsonl != null) { sinks.add(new FileJsonPublisher(Paths.get(jsonl))); }
         if (httpUrl != null) { sinks.add(new HttpJsonPublisher(httpUrl, httpTimeoutMs, headers, allowInsecureHttp)); }
         if (webPort > 0) {
@@ -94,6 +101,7 @@ public final class HeadlessPhilipsGatewayApp {
         int httpTimeoutMs = 3000;
         boolean allowInsecureHttp = false;
         int webPort = 0;
+        String stdoutMode = "json";
         int queueCapacity = 10000;
         int publishAttempts = 5;
         long publishRetryBackoffMs = 500L;
@@ -124,7 +132,12 @@ public final class HeadlessPhilipsGatewayApp {
                 else if ("--publish-retry-backoff-ms".equals(k)) { a.publishRetryBackoffMs = Long.parseLong(required(k, v)); i++; }
                 else if ("--shutdown-drain-timeout-ms".equals(k)) { a.shutdownDrainTimeoutMs = Long.parseLong(required(k, v)); i++; }
                 else if ("--reconnect-ms".equals(k)) { a.reconnectMs = Long.parseLong(required(k, v)); i++; }
-                else if ("--stdout".equals(k)) { a.stdout = Boolean.valueOf(required(k, v)); i++; }
+                else if ("--stdout".equals(k)) {
+                    String sv = required(k, v);
+                    if ("compact".equalsIgnoreCase(sv)) { a.stdout = true; a.stdoutMode = "compact"; }
+                    else { a.stdout = Boolean.valueOf(sv); }
+                    i++;
+                }
                 else if ("--help".equals(k)) { usageAndExit(); }
                 else { throw new IllegalArgumentException("Unknown argument: " + k); }
             }
