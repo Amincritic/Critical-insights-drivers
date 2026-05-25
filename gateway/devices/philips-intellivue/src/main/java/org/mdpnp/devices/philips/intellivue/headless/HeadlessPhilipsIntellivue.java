@@ -49,6 +49,7 @@ public class HeadlessPhilipsIntellivue extends Intellivue {
     private static final long EXTENDED_POLL_RENEW_MS = 25000L;
     private static final long PATIENT_POLL_MS = 10000L;
     private static final long KEEP_ALIVE_MS = 8000L;
+    private static final long STARTUP_POLL_DELAY_MS = 500L;
     private final String gatewayId;
     private final String bedId;
     private final String deviceId;
@@ -87,10 +88,10 @@ public class HeadlessPhilipsIntellivue extends Intellivue {
         System.err.println("Philips association accepted — starting periodic polling");
         publishConnectivity("Connected", transportType(), "Philips IntelliVue association accepted", null);
         publishDeviceIdentity();
-        // Start a polling thread — delay briefly to let the network loop process
+        // Start a polling thread after a short post-association settle period.
         Thread poller = new Thread(new Runnable() {
             @Override public void run() {
-                try { Thread.sleep(2000); } catch (InterruptedException e) { return; }
+                try { Thread.sleep(STARTUP_POLL_DELAY_MS); } catch (InterruptedException e) { return; }
                 System.err.println("Philips poller started");
                 configureWaveformPriorityList();
                 try {

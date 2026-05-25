@@ -338,6 +338,9 @@ public class HeadlessDraegerMedibus extends RTMedibus {
         Number parsed = parseNumber(rawValue);
         if (parsed == null) { return null; }
         String metric = normalizeMeasuredMetric(codepage, code);
+        if ("TidalVolume".equals(metric) && rawValue != null && rawValue.indexOf('.') >= 0) {
+            return Double.valueOf(parsed.doubleValue() * 1000.0d);
+        }
         if ("RespiratoryMinuteVolume".equals(metric) && rawValue != null && rawValue.indexOf('.') < 0) {
             return Double.valueOf(parsed.doubleValue() / 10.0d);
         }

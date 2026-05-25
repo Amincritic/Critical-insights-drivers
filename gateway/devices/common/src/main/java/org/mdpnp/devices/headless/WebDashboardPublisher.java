@@ -251,6 +251,9 @@ var activeDeviceId=null;
 var selector=document.getElementById('deviceSelect');
 var requestedDeviceId=new URLSearchParams(window.location.search).get('device');
 
+function metricToken(v){return String(v||'').toUpperCase().replace(/[^A-Z0-9]+/g,'');}
+function metricHas(metric,token){return metric.indexOf(metricToken(token))>=0;}
+
 function newDeviceState(id){
   var t=[];
   for(var i=0;i<4;i++)t[i]=new Array(TRACE_LEN).fill(0.5);
@@ -375,27 +378,27 @@ function processEvent(d){
   if(v==null||v==undefined){finishEvent(s,visible,visibleState);return;}
   v=Math.round(v*10)/10;
 
-  // Philips metrics
-  if(m.indexOf('CARD_BEAT_RATE')>=0||m.indexOf('ECG_CARD')>=0){hr=v;document.getElementById('vHR').textContent=Math.round(v);}
-  else if(m.indexOf('SAT_O2')>=0&&m.indexOf('PULS_OXIM')>=0){spo2=v;document.getElementById('vSpO2').textContent=Math.round(v);}
-  else if(m.indexOf('ABP_SYS')>=0||m.indexOf('ART_ABP_SYS')>=0){abpS=v;updateABP();}
-  else if(m.indexOf('ABP_DIA')>=0||m.indexOf('ART_ABP_DIA')>=0){abpD=v;updateABP();}
-  else if(m.indexOf('ABP_MEAN')>=0||m.indexOf('ART_ABP_MEAN')>=0){abpM=v;updateABP();}
-  else if(m.indexOf('RESP_RATE')>=0||m=='NOM_RESP'||m.indexOf('NOM_RESP_RATE')>=0){rr=v;document.getElementById('vRR').textContent=Math.round(v);}
-  else if(m.indexOf('CO2_ET')>=0||m.indexOf('AWAY_CO2')>=0){etco2=v;document.getElementById('vCO2').textContent=Math.round(v);}
-  else if(m.indexOf('TEMP_BLD')>=0||m.indexOf('TEMP')>=0&&m.indexOf('AW')<0){temp=v;document.getElementById('vTemp').textContent=v.toFixed(1);}
-  else if(m.indexOf('PULS_RATE')>=0){hr=v;document.getElementById('vHR').textContent=Math.round(v);}
+  var mt=metricToken(m);
 
-  // Draeger metrics
-  else if(m.indexOf('PeakBreathingPressure')>=0||m.indexOf('BreathingPressure')>=0&&m.indexOf('PEEP')<0){paw=v;updateVent();}
-  else if(m.indexOf('PEEP')>=0){peep=v;updateVent();}
-  else if(m.indexOf('TidalVolume')>=0){hr=v;document.getElementById('vHR').textContent=Math.round(v);}
-  else if(m.indexOf('InspO2')>=0||m.indexOf('FiO2')>=0){spo2=v;document.getElementById('vSpO2').textContent=Math.round(v);}
-  else if(m.indexOf('Compliance')>=0){etco2=v;document.getElementById('vCO2').textContent=Math.round(v);}
-  else if(m.indexOf('Resistance')>=0){}
-  else if(m.indexOf('AirwayTemp')>=0){temp=v;document.getElementById('vTemp').textContent=v.toFixed(1);}
-  else if(m.indexOf('RespiratoryMinuteVolume')>=0){abpM=v;document.getElementById('vABP').textContent=v.toFixed(1);}
-  else if(m.indexOf('SpontaneousRespiratoryRate')>=0||m.indexOf('RespiratoryRate')>=0){rr=v;document.getElementById('vRR').textContent=Math.round(v);}
+  // Philips patient-monitor metrics
+  if(metricHas(mt,'CARD_BEAT_RATE')||metricHas(mt,'ECG_CARD')||metricHas(mt,'PULS_RATE')){hr=v;}
+  else if(metricHas(mt,'SAT_O2')||metricHas(mt,'SATO2')||metricHas(mt,'PULSOXIM')){spo2=v;}
+  else if(metricHas(mt,'ABP_SYS')||metricHas(mt,'ART_ABP_SYS')||metricHas(mt,'PRESS_BLD_ART_ABP_SYS')){abpS=v;}
+  else if(metricHas(mt,'ABP_DIA')||metricHas(mt,'ART_ABP_DIA')||metricHas(mt,'PRESS_BLD_ART_ABP_DIA')){abpD=v;}
+  else if(metricHas(mt,'ABP_MEAN')||metricHas(mt,'ART_ABP_MEAN')||metricHas(mt,'PRESS_BLD_ART_ABP_MEAN')){abpM=v;}
+  else if(metricHas(mt,'RESP_RATE')||mt==='NOMRESP'||metricHas(mt,'NOM_RESP_RATE')){rr=v;}
+  else if(metricHas(mt,'CO2_ET')||metricHas(mt,'AWAY_CO2')||metricHas(mt,'ENDTIDALCO2')){etco2=v;}
+  else if((metricHas(mt,'TEMP_BLD')||metricHas(mt,'TEMP'))&&!metricHas(mt,'AIRWAY')){temp=v;}
+
+  // Draeger ventilator metrics. Values reuse the display slots after Draeger chrome relabels them.
+  else if(metricHas(mt,'PEEPBREATHINGPRESSURE')||mt==='PEEP'||metricHas(mt,'INTERMITTENTPEEP')){peep=v;}
+  else if(metricHas(mt,'PEAKBREATHINGPRESSURE')||metricHas(mt,'BREATHINGPRESSURE')){paw=v;}
+  else if(metricHas(mt,'TIDALVOLUME')||metricHas(mt,'VTEMAND')||metricHas(mt,'VTESPON')||metricHas(mt,'VTE')||metricHas(mt,'VTI')){hr=v;}
+  else if(metricHas(mt,'INSPO2')||metricHas(mt,'INSPIREDOXYGEN')||metricHas(mt,'FIO2')){spo2=v;}
+  else if(metricHas(mt,'COMPLIANCE')){etco2=v;}
+  else if(metricHas(mt,'AIRWAYTEMPERATURE')||metricHas(mt,'AIRWAYTEMP')){temp=v;}
+  else if(metricHas(mt,'RESPIRATORYMINUTEVOLUME')||metricHas(mt,'MINUTEVOLUME')){abpM=v;}
+  else if(metricHas(mt,'SPONTANEOUSRESPIRATORYRATE')||metricHas(mt,'RESPIRATORYRATE')){rr=v;}
   finishEvent(s,visible,visibleState);
 }
 
