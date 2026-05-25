@@ -27,10 +27,6 @@ jobs:
         working-directory: simulator
         run: ../gateway/gradlew installDist
 
-      - name: Compile GUI/test simulators
-        working-directory: gateway
-        run: javac test-tools/PhilipsWaveformFrame.java test-tools/CriticalInsightsMonitor.java test-tools/IntellivueSerialSimulator.java test-tools/MedibusSimulatorV2.java
-
       - name: Canonical replay smoke test
         run: ./scripts/test-canonical-replay.sh
 
