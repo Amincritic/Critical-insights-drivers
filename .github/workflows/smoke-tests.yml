@@ -1,0 +1,38 @@
+name: Smoke Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install socat
+        run: sudo apt-get update && sudo apt-get install -y socat
+
+      - name: Build gateway runtime
+        working-directory: gateway
+        run: ./gradlew :runtime:installDist
+
+      - name: Build simulator runtime
+        working-directory: simulator
+        run: ../gateway/gradlew installDist
+
+      - name: Compile GUI/test simulators
+        working-directory: gateway
+        run: javac test-tools/PhilipsWaveformFrame.java test-tools/CriticalInsightsMonitor.java test-tools/IntellivueSerialSimulator.java test-tools/MedibusSimulatorV2.java
+
+      - name: Canonical replay smoke test
+        run: ./scripts/test-canonical-replay.sh
+
+      - name: RS232 simulator smoke test
+        run: ./scripts/test-rs232-simulators.sh

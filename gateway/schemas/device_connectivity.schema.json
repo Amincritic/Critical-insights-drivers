@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://critical-insights.local/schemas/device_connectivity.schema.json",
+  "title": "DeviceConnectivity",
+  "type": "object",
+  "required": ["schema_version", "topic", "unique_device_identifier", "state", "type", "presentation_time"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "topic": { "const": "DeviceConnectivity" },
+    "unique_device_identifier": { "type": "string", "minLength": 1 },
+    "state": { "type": "string" },
+    "type": { "type": "string" },
+    "info": { "type": ["string", "null"] },
+    "valid_targets": { "type": "array", "items": { "type": "string" } },
+    "comPort": { "type": ["string", "null"] },
+    "presentation_time": { "type": "string", "format": "date-time" },
+    "gateway_id": { "type": "string" },
+    "bed_id": { "type": "string" },
+    "vendor": { "type": "string" },
+    "protocol": { "type": "string" }
+  },
+  "additionalProperties": true
+}

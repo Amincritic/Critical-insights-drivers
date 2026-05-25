@@ -1,278 +1,468 @@
-# CriticalInsights Medical Device Gateway
+# Critical Insights
 
-A headless gateway that reads vital signs from Draeger ventilators (MEDIBUS) and Philips IntelliVue patient monitors (LAN/UDP and MIB/RS232) over RS-232 serial ports and publishes normalized JSON to stdout, files, HTTP endpoints, and a built-in web dashboard.
+Critical Insights is a Java gateway and simulator workspace for medical-device data integration. It connects to supported bedside-device protocols, decodes the device-specific traffic, normalizes the result into canonical JSON events, and publishes those events to stdout, JSONL files, HTTP endpoints, and the built-in web dashboard.
 
-## What's included
+The browser UI does not decode Philips or Draeger protocol frames. All protocol decoding happens in the gateway drivers. The UI, replay simulator, and external consumers receive decoded canonical events.
 
-- **Draeger MEDIBUS driver** — serial and TCP, ICC handshake, even parity, realtime data
-- **Philips IntelliVue driver** — LAN/UDP and MIB/RS232, association negotiation, poll rate limiting
-- **Multi-device launcher** — both devices in one process on one edge gateway
-- **Auto-detect** — probes COM ports to identify which device is on which port
-- **Web dashboard** — built-in dark patient monitor UI served via SSE on a single HTTP port
-- **Compact CLI output** — one-line vital sign summaries instead of raw JSON
-- **Device simulators** — spec-compliant CLI and GUI simulators for testing without hardware
-- **Production hardening** — heartbeat monitoring, log rotation, systemd service, file permissions
-- **Runtime packaging** — 3.4MB deployable bundle (no Gradle/source needed on target)
+## Repository Layout
 
-## Documentation
+```text
+critical-insights/
+  gateway/      production gateway runtime, protocol drivers, schemas, and web publisher
+  simulator/    GUI launcher, protocol simulators, canonical replay, and scenario fixtures
+  scripts/      top-level launchers and smoke tests
+  docs/         schema, simulator, integration, and development documentation
+```
 
-| Document | What it covers |
-|----------|---------------|
-| **[README.md](README.md)** (this file) | Quick start, scripts, output options, deployment |
-| **[ARCHITECTURE.md](ARCHITECTURE.md)** | System diagram, data flow, protocol details, thread model, JSON schema |
-| **[HARDWARE.md](HARDWARE.md)** | Pin mappings, cable wiring (RJ-45 to DB-9), device configuration steps |
-| **[SIMULATOR.md](SIMULATOR.md)** | CLI and GUI simulators, testing without hardware, HIL testing |
-| **[FIXES_APPLIED.md](FIXES_APPLIED.md)** | All bug fixes, protocol compliance changes, and new features |
+The gateway code is OpenICE-derived, but the active product workflow is the top-level `critical-insights` workspace.
 
----
+## Which Path Should I Follow?
 
-## Quick start
+Use this table before reading the rest of the docs:
+
+| Goal | Start here | Notes |
+| --- | --- | --- |
+| Run the simulator GUI, gateway, and web dashboard locally | This README, starting at `Quick Start: GUI Simulator, Drivers, And Web Dashboard` | Best first run for development. |
+| Run protocol simulators without the GUI | This README, `Quick Start: Headless Protocol Simulators` | Exercises the real drivers. |
+| Test the web/API with deterministic JSON only | This README, `Quick Start: Canonical Replay` | Does not test protocol decoding. |
+| Test RS232 locally without hardware | This README, `Quick Start: RS232 Simulation Without Hardware` | Requires `socat`. |
+| Deploy only drivers on an edge device | `docs/edge-driver-deployment.md` | No simulator and no web dashboard required. |
+| Deploy only the Philips driver | `gateway/devices/philips-intellivue/EDGE.md` | Device-specific commands and output examples. |
+| Deploy only the Draeger driver | `gateway/devices/draeger-medibus/EDGE.md` | Device-specific commands, profiles, and output examples. |
+| Build your own dashboard/backend | `docs/dashboard-integration.md` | Consume canonical events through SSE, JSONL, or HTTP POST. |
+| Understand the JSON event fields | `docs/canonical-schema.md` | Canonical topics and field definitions. |
+| Wire real RS232 hardware | `gateway/HARDWARE.md` | Cable, serial settings, and safety notes. |
+| Add another device later | `docs/adding-devices.md` | Required structure for future device modules. |
+
+## Supported Devices And Transports
+
+| Device family | Protocol | Transport | Gateway driver | Simulator |
+| --- | --- | --- | --- | --- |
+| Philips IntelliVue / MX series | IntelliVue Data Export | LAN/UDP | Numerics, waveforms, patient alerts, technical alerts, identity, connectivity | Yes |
+| Philips IntelliVue / MX series | MIB/RS232 fixed baudrate | Serial RS232 | Numerics, waveforms, patient alerts, technical alerts, identity, connectivity | Yes |
+| Draeger ventilators | MEDIBUS | TCP | Numerics, waveforms, alerts, settings, text messages, identity, connectivity | Yes |
+| Draeger ventilators | MEDIBUS | Serial RS232 | Numerics, waveforms, alerts, settings, text messages, identity, connectivity | Yes |
+| Canonical replay | Canonical JSONL | HTTP POST to gateway web API | Dashboard/API only, no protocol decode | Yes |
+
+Use protocol simulation when you want to exercise the real driver decode path. Use canonical replay when you want deterministic dashboard/API behavior without testing protocol decoding.
+
+## Requirements
+
+- Java 17.
+- Bash-compatible shell.
+- `socat` for local RS232 simulation without real hardware.
+- Real RS232 ports or USB-to-RS232 adapters for real-device validation.
+
+On macOS, the virtual serial helper creates `/tmp/...` symlinks that point to `/dev/ttys*`. If Java rejects the symlink, use the resolved `/dev/ttys*` path printed by `scripts/start-virtual-serial-pairs.sh`.
+
+## Build
+
+Run from this directory:
 
 ```bash
-# 1. Install JDK 17
-sudo apt update && sudo apt install -y openjdk-17-jdk
+cd critical-insights
 
-# 2. Build everything
-./setup.sh
+cd simulator
+../gateway/gradlew installDist
 
-# 3. Test without real devices (runs a Draeger simulator for 30 seconds)
-./test.sh
+cd ../gateway
+./gradlew :runtime:installDist
 
-# 4. Simulate with the GUI monitor
-java -cp test-tools CriticalInsightsMonitor
-
-# 5. Run with real devices (auto-detect COM ports)
-./run.sh --auto --stdout
-
-# 6. Deploy as a systemd service
-sudo bash deploy/deploy.sh
+cd ..
 ```
 
----
+The simulator currently uses the Gradle wrapper under `gateway/`.
 
-## Script reference
+## Quick Start: GUI Simulator, Drivers, And Web Dashboard
 
-| Script | Purpose |
-|--------|---------|
-| `./setup.sh` | One-time setup: detects JDK, downloads Gradle, builds everything, compiles test tools |
-| `./test.sh` | Automated test: runs Draeger simulator + gateway for 30 seconds (accepts `./test.sh 9100 60` for custom port/duration) |
-| `./run.sh --help` | Shows all run options with examples |
-| `./run.sh --auto --stdout` | Auto-detect devices on COM ports and run |
-| `./hil-test.sh` | HIL test with virtual serial ports via `socat` (accepts `--duration 120`, `--multi`, `--loopback`) |
-| `./package.sh` | Build a distributable runtime package (~3.4 MB) |
-| `sudo bash deploy/deploy.sh` | Production deployment: creates service user, installs systemd service and logrotate |
+Use three terminals.
 
----
-
-## Output options
-
-All launchers share these output flags:
-
-| Flag | Description |
-|------|-------------|
-| `--stdout true` | Print JSON events to stdout (enabled by default if no file/HTTP sink is set) |
-| `--stdout compact` | Print a compact one-line summary per second instead of raw JSON |
-| `--jsonl <path>` | Append JSON events to a JSONL file |
-| `--dead-letter-jsonl <path>` | Write events that fail all publish attempts to a dead-letter file |
-| `--http-url <url>` | POST JSON events to an HTTP endpoint (HTTPS required unless `--allow-insecure-http true`) |
-| `--http-header 'Name: value'` | Add HTTP headers (repeatable, e.g. `--http-header 'Authorization: Bearer TOKEN'`) |
-| `--web-port <port>` | Start the built-in web dashboard on this port |
-| `--queue-capacity <n>` | Internal publish queue size (default 10,000) |
-| `--publish-attempts <n>` | Max retry attempts per event (default 5) |
-| `--reconnect-ms <ms>` | Reconnection delay after device disconnect (default 5000) |
-
-When `--jsonl` or `--http-url` is set, stdout is disabled unless you explicitly pass `--stdout true` or `--stdout compact`.
-
----
-
-## Running with simulators
-
-### CLI simulators
+Terminal 1: start the simulator GUI:
 
 ```bash
-# Terminal 1 -- Draeger simulator
-java -cp test-tools MedibusSimulatorV2 --tcp 9100
-
-# Terminal 2 -- connect gateway
-./run.sh --draeger-tcp 127.0.0.1:9100 --stdout
+cd critical-insights
+./scripts/run-simulator-gui.sh
 ```
+
+In the GUI, start the Philips IntelliVue LAN/UDP simulator and the Draeger MEDIBUS TCP simulator. The default simulator endpoints are:
+
+```text
+Philips LAN/UDP simulator: UDP 24105
+Draeger TCP simulator:    TCP 9100
+```
+
+Terminal 2: start the gateway drivers and web dashboard:
 
 ```bash
-# Terminal 1 -- Philips simulator
-java -cp test-tools IntellivueSimulatorV2 --port 24105
-
-# Terminal 2 -- connect gateway
-./run.sh --philips-host 127.0.0.1 --stdout
+cd critical-insights
+./scripts/run-gateway.sh --multi \
+  --philips-host 127.0.0.1 \
+  --draeger-tcp 127.0.0.1:9100 \
+  --web-port 8081 \
+  --stdout compact \
+  --output-format canonical
 ```
 
-### GUI simulator (CriticalInsightsMonitor)
+Terminal 3 or browser: open the dashboard:
 
-The primary GUI provides a dark patient-monitor interface with real-time waveforms, adjustable sliders, alarm triggers, and clinical scenarios.
+```text
+http://localhost:8081
+```
+
+The dashboard includes a device selector. When multiple devices are running, choose `philips_mx800_01` or `draeger_vent_01` from the selector. You can also open a device directly:
+
+```text
+http://localhost:8081/?device=philips_mx800_01
+http://localhost:8081/?device=draeger_vent_01
+```
+
+## Quick Start: Headless Protocol Simulators
+
+If you do not need the GUI, start the default local protocol simulators:
 
 ```bash
-java -cp test-tools CriticalInsightsMonitor
+cd critical-insights
+./scripts/run-simulator.sh --config simulator/config/local.properties
 ```
 
-Then connect the gateway to both simulators:
+In another terminal, start the gateway:
 
 ```bash
-./run.sh --multi --philips-host 127.0.0.1 --draeger-tcp 127.0.0.1:9100 --stdout
+cd critical-insights
+./scripts/run-gateway.sh --multi \
+  --philips-host 127.0.0.1 \
+  --draeger-tcp 127.0.0.1:9100 \
+  --web-port 8081 \
+  --stdout compact \
+  --output-format canonical
 ```
 
-See [SIMULATOR.md](SIMULATOR.md) for the full simulator reference.
+Open:
 
----
+```text
+http://localhost:8081
+```
 
-## Running with real devices
+## Quick Start: Canonical Replay
 
-### Auto-detect COM ports (recommended)
+Canonical replay bypasses protocol decoding and posts canonical JSON events directly into the web dashboard API. Use it for UI demos, schema checks, or deterministic frontend work.
+
+Terminal 1: start the gateway in web-only mode:
 
 ```bash
-./run.sh --auto --jsonl /var/log/openice/bed01.jsonl --stdout
+cd critical-insights
+./scripts/run-gateway.sh --web-only \
+  --web-port 8099 \
+  --stdout false \
+  --output-format canonical
 ```
 
-The auto-detect probes each port: sends a MEDIBUS request at 19200 baud (Draeger responds), then checks remaining ports at 115200 baud for data (Philips). You can also run detection standalone:
+Terminal 2: start replay:
 
 ```bash
-java -cp test-tools PortDetector
+cd critical-insights
+./scripts/run-simulator.sh --config simulator/config/replay.properties
 ```
 
-### Manual port selection
+Open:
+
+```text
+http://localhost:8099
+```
+
+Other replay scenarios are documented in `docs/simulator-scenarios.md`.
+
+## Quick Start: RS232 Simulation Without Hardware
+
+Install `socat`, then create virtual serial pairs:
 
 ```bash
-./run.sh --multi \
-  --philips-serial /dev/ttyS0 \
-  --draeger-serial /dev/ttyS1 \
-  --jsonl /var/log/openice/bed01.jsonl --stdout
+cd critical-insights
+./scripts/start-virtual-serial-pairs.sh
 ```
 
-### AIR-021 setup
+Keep that terminal open. It creates stable names:
 
-The Advantech AIR-021 has two built-in RS-232 COM ports, typically `/dev/ttyS0` and `/dev/ttyS1`.
+```text
+/tmp/philips-device   simulator side for Philips
+/tmp/philips-gateway  gateway side for Philips
+/tmp/draeger-device   simulator side for Draeger
+/tmp/draeger-gateway  gateway side for Draeger
+```
+
+Terminal 2: start the RS232 protocol simulators:
 
 ```bash
-# Identify ports
-dmesg | grep tty
-
-# Ensure serial access
-sudo usermod -aG dialout $USER
-
-# Set JDK
-export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+cd critical-insights
+./scripts/run-simulator.sh --config simulator/config/serial-rs232.properties
 ```
 
-See [HARDWARE.md](HARDWARE.md) for cable wiring, pin mappings, and device configuration steps.
-
----
-
-## Web dashboard
-
-Start the gateway with `--web-port` to serve a built-in patient monitor dashboard:
+Terminal 3: start the gateway against the gateway ends of the virtual serial pairs:
 
 ```bash
-./run.sh --auto --stdout --web-port 8080
+cd critical-insights
+./scripts/run-gateway.sh --multi \
+  --philips-serial /tmp/philips-gateway \
+  --draeger-serial /tmp/draeger-gateway \
+  --web-port 8081 \
+  --stdout compact \
+  --output-format canonical
 ```
 
-Then open `http://localhost:8080` in a browser. The dashboard uses Server-Sent Events (SSE) on the same HTTP port -- no WebSocket or additional ports needed.
+Open:
 
-Endpoints:
+```text
+http://localhost:8081
+```
 
-| Path | Description |
-|------|-------------|
-| `GET /` | HTML dashboard page (dark patient monitor UI) |
-| `GET /events` | SSE stream of JSON vital sign events |
-| `GET /api/latest` | Most recent event as JSON |
-
-Works with both real devices and simulators.
-
----
-
-## Production deployment
-
-### Automated deployment
+Automated RS232 smoke test:
 
 ```bash
-sudo bash deploy/deploy.sh
+./scripts/test-rs232-simulators.sh
 ```
 
-This script checks for JDK 17, creates an `openice` service user with `dialout` group access, builds the project, installs to `/opt/openice-headless/`, and configures logrotate and systemd.
+The test requires Philips numeric, Philips waveform, Philips alert, and Draeger numeric events to reach the gateway output.
 
-After deployment, edit the service file for your COM ports and start:
+## Running Only One Device
+
+Philips LAN/UDP:
 
 ```bash
-sudo nano /etc/systemd/system/openice-multidevice.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now openice-multidevice
-sudo journalctl -u openice-multidevice -f
+./scripts/run-gateway.sh --philips-host 127.0.0.1 \
+  --web-port 8081 \
+  --stdout compact \
+  --output-format canonical
 ```
 
-### Packaging for transfer
+Philips MIB/RS232:
 
 ```bash
-./package.sh
+./scripts/run-gateway.sh --philips-serial /dev/ttyS0 \
+  --web-port 8081 \
+  --stdout compact \
+  --output-format canonical
 ```
 
-Produces a ~3.4 MB archive that can be copied to target machines.
+Use `--philips-baud 19200` only if the monitor-side MIB/RS232 port is configured for 19200 fixed-baudrate mode. The default is 115200 baud, 8 data bits, no parity, 1 stop bit, no flow control.
 
----
-
-## Monitoring
-
-### Heartbeat
-
-The gateway logs a `HEARTBEAT` line to stderr every 60 seconds:
-
-```
-HEARTBEAT | threads: draeger-medibus-supervisor=alive philips-mib-rs232-supervisor=alive | devices: draeger_vent_01=connected(last_data=3s_ago) philips_mx800_01=connected(last_data=1s_ago)
-```
-
-Device state changes are logged immediately:
-
-```
-DEVICE_STATE draeger_vent_01: connected
-DEVICE_STATE philips_mx800_01: disconnected
-```
-
-### What to watch for
-
-- `last_data` growing beyond a few seconds: device may be off or cable disconnected
-- Thread state `DEAD`: a supervisor thread exited unexpectedly
-- `DEVICE_STATE ... disconnected` without a subsequent `connected`: check the physical connection
-
-### Log rotation
-
-Logs are rotated daily (30-day retention, compressed after 1 day, `copytruncate`). Install manually if you did not use `deploy/deploy.sh`:
+Draeger TCP:
 
 ```bash
-sudo cp deploy/logrotate-openice /etc/logrotate.d/openice
+./scripts/run-gateway.sh --draeger-tcp 127.0.0.1:9100 \
+  --web-port 8081 \
+  --stdout compact \
+  --output-format canonical
 ```
 
-JSONL output files are created with `0640` permissions (not world-readable).
+Draeger RS232:
 
----
-
-## Troubleshooting
-
-**Permission denied on serial port:**
 ```bash
-sudo usermod -aG dialout $USER   # then log out/in
+./scripts/run-gateway.sh --draeger-serial /dev/ttyS1 \
+  --web-port 8081 \
+  --stdout compact \
+  --output-format canonical
 ```
 
-**No data from Draeger:**
-Check serial path, baud rate (default 19200), that MEDIBUS is enabled on the ventilator, and that the service user has serial permissions.
+For Draeger V500 testing, use:
 
-**Philips reconnects repeatedly:**
-Verify correct monitor IP or serial path, firewall/VLAN settings, cable type (straight-through for Philips, null-modem for Draeger), and that MIB/RS232 is enabled on the monitor.
-
-**HTTP endpoint failures:**
-Events are retried automatically. Configure `--dead-letter-jsonl` so failed events are not silently lost.
-
-**`installDist` not found:**
-Run `./setup.sh` first or build with `./gradlew :devices:multidevice:installDist`.
-
-**Gradle version mismatch:**
 ```bash
-./gradlew --stop
-rm -rf ~/.gradle/caches/7.6/scripts
-./gradlew clean build
+./scripts/run-gateway.sh --draeger-tcp 127.0.0.1:9100 \
+  --draeger-profile v500 \
+  --web-port 8081 \
+  --stdout compact \
+  --output-format canonical
 ```
+
+Supported Draeger profiles are `v500`, `intensive-care`, `evita`, `savina`, and `fabius`.
+
+## Gateway Options
+
+Run:
+
+```bash
+./scripts/run-gateway.sh --help
+```
+
+Common options:
+
+| Option | Meaning |
+| --- | --- |
+| `--multi` | Run the combined runtime with one or more configured device drivers. |
+| `--web-only` | Run only the web/API publisher for canonical replay. |
+| `--philips-host <ip>` | Connect Philips IntelliVue LAN/UDP. Use `127.0.0.1` for the simulator. |
+| `--philips-serial <port>` | Connect Philips MIB/RS232 over serial. |
+| `--philips-baud <baud>` | Optional Philips serial baud override, usually `115200` or `19200`. |
+| `--draeger-tcp <host:port>` | Connect Draeger MEDIBUS over TCP. |
+| `--draeger-serial <port>` | Connect Draeger MEDIBUS over serial. |
+| `--draeger-baud <baud>` | Optional Draeger serial baud override. |
+| `--serial-parity none|even|odd` | Optional serial parity override for devices that differ from defaults. |
+| `--draeger-profile <profile>` | MEDIBUS command profile. |
+| `--gateway-id <id>` | Identifier added to each canonical event. Default: `air021_01`. |
+| `--bed-id <id>` | Bed/location identifier added to each canonical event. Default: `bed_01`. |
+| `--device-id <id>` | Override single-device ID. In `--multi`, Philips and Draeger also have device-specific IDs internally. |
+| `--web-port <port>` | Start built-in dashboard and API on this port. |
+| `--stdout true|false|compact` | Print canonical JSON to terminal. `compact` prints a human-readable summary. |
+| `--jsonl <path>` | Append one canonical JSON event per line to a file. |
+| `--http-url <url>` | POST each canonical JSON event to an external HTTP endpoint. |
+| `--http-header '<name>: <value>'` | Add a header to HTTP POST publishing. Can be repeated. |
+| `--output-format canonical` | Compatibility flag. Runtime output is canonical only. |
+
+`legacy` and `both` output formats are intentionally not supported at runtime.
+
+## Web Dashboard And API
+
+When the gateway is started with `--web-port`, these endpoints are available:
+
+| Endpoint | Method | Purpose |
+| --- | --- | --- |
+| `/` | `GET` | Built-in web dashboard. |
+| `/events` | `GET` | Server-Sent Events stream of canonical JSON events. |
+| `/api/latest` | `GET` | Most recent canonical event seen by the web publisher. |
+| `/api/events` | `POST` | Accept one canonical JSON event, used by replay and UI tests. |
+
+Example SSE consumer:
+
+```bash
+curl -N http://localhost:8081/events
+```
+
+Example latest-event check:
+
+```bash
+curl http://localhost:8081/api/latest
+```
+
+Example replay post:
+
+```bash
+curl -X POST http://localhost:8081/api/events \
+  -H 'Content-Type: application/json' \
+  --data '{"schema_version":"1.0","topic":"DeviceConnectivity","unique_device_identifier":"demo_01","state":"Connected","type":"Replay","presentation_time":"2026-05-24T00:00:00Z"}'
+```
+
+For building your own dashboard, consume `/events`, `--jsonl`, or `--http-url` and implement against the canonical event schema in `docs/canonical-schema.md`. Do not parse `--stdout compact`; it is for people reading the terminal.
+
+## Driver Output Format
+
+Drivers publish canonical JSON only. Each event is a complete JSON object with:
+
+- common routing fields such as `schema_version`, `topic`, `unique_device_identifier`, `presentation_time`, `gateway_id`, `bed_id`, `vendor`, and `protocol`
+- topic-specific payload fields
+- optional protocol metadata when useful
+
+Common topics:
+
+| Topic | Used for |
+| --- | --- |
+| `DeviceConnectivity` | Connection state and transport status. |
+| `DeviceIdentity` | Device model, manufacturer, serial, and build metadata. |
+| `Patient` / `PatientDemographics` | Patient context when the protocol provides it. |
+| `Numeric` | One scalar observation such as HR, SpO2, RR, FiO2, PEEP, or temperature. |
+| `SampleArray` | One decoded waveform/sample-array event. |
+| `PatientAlert` | Clinical/patient alarms. |
+| `TechnicalAlert` | Device, sensor, lead, communication, or technical alarms. |
+| `DeviceSetting` | Decoded ventilator/device setting. |
+| `TextMessage` | Decoded device status or text message. |
+| `DeviceTime` | Device-reported time. |
+
+Example numeric event:
+
+```json
+{
+  "schema_version": "1.0",
+  "topic": "Numeric",
+  "unique_device_identifier": "philips_mx800_01",
+  "metric_id": "NOM_PULS_OXIM_SAT_O2",
+  "vendor_metric_id": "NOM_PULS_OXIM_SAT_O2",
+  "instance_id": 0,
+  "unit_id": "NOM_DIM_PERCENT",
+  "value": 97.0,
+  "device_time": null,
+  "presentation_time": "2026-05-24T21:01:03.573649Z",
+  "gateway_id": "air021_01",
+  "bed_id": "bed_01",
+  "vendor": "philips",
+  "protocol": "intellivue_udp",
+  "schema_valid": true
+}
+```
+
+Example waveform event:
+
+```json
+{
+  "schema_version": "1.0",
+  "topic": "SampleArray",
+  "unique_device_identifier": "philips_mx800_01",
+  "metric_id": "NOM_ECG_ELEC_POTL_II",
+  "vendor_metric_id": "NOM_ECG_ELEC_POTL_II",
+  "instance_id": 0,
+  "unit_id": "NOM_DIM_MILLI_BAR",
+  "frequency": 500,
+  "values": [129, 130, 126, 128],
+  "sample_period_us": 2000,
+  "sample_size_bits": 8,
+  "significant_bits": 8,
+  "array_size": 4,
+  "presentation_time": "2026-05-24T21:11:46.552516Z",
+  "gateway_id": "air021_01",
+  "bed_id": "bed_01",
+  "vendor": "philips",
+  "protocol": "philips_mib_rs232",
+  "schema_valid": true
+}
+```
+
+For a complete integration guide, see `docs/dashboard-integration.md`. For field-by-field schema details, see `docs/canonical-schema.md`.
+
+## Data Flow
+
+Live-device path:
+
+```text
+device or protocol simulator
+  -> protocol transport
+  -> gateway protocol driver
+  -> decoded observations
+  -> canonical JSON event
+  -> stdout / JSONL / HTTP POST / SSE / web dashboard
+```
+
+Canonical replay path:
+
+```text
+canonical JSONL fixture
+  -> replay simulator
+  -> POST /api/events
+  -> web publisher
+  -> SSE / dashboard
+```
+
+## Verification
+
+Run these after changing drivers, canonical output, simulator behavior, or web rendering:
+
+```bash
+./scripts/test-canonical-replay.sh
+./scripts/test-rs232-simulators.sh
+```
+
+Run the Java build after code changes:
+
+```bash
+cd gateway
+./gradlew :runtime:installDist
+```
+
+Real hardware validation is separate from simulator success. Use `gateway/HARDWARE.md` before connecting bedside devices.
+
+## More Documentation
+
+- `docs/README.md`: documentation index.
+- `docs/canonical-schema.md`: canonical event contract.
+- `docs/dashboard-integration.md`: how to consume events in your own dashboard or backend.
+- `docs/edge-driver-deployment.md`: how to run only the drivers on an edge device.
+- `docs/simulator-scenarios.md`: simulator configs, fixtures, and scenarios.
+- `docs/adding-devices.md`: how to add more devices/protocols.
+- `gateway/HARDWARE.md`: real RS232 wiring and serial settings.
+- `gateway/ARCHITECTURE.md`: gateway internals.

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://critical-insights.local/schemas/patient.schema.json",
+  "title": "Patient",
+  "type": "object",
+  "required": ["schema_version", "topic", "mrn", "presentation_time"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "topic": { "const": "Patient" },
+    "mrn": { "type": ["string", "null"] },
+    "given_name": { "type": ["string", "null"] },
+    "family_name": { "type": ["string", "null"] },
+    "presentation_time": { "type": "string", "format": "date-time" },
+    "unique_device_identifier": { "type": "string" },
+    "gateway_id": { "type": "string" },
+    "bed_id": { "type": "string" },
+    "vendor": { "type": "string" },
+    "protocol": { "type": "string" }
+  },
+  "additionalProperties": true
+}

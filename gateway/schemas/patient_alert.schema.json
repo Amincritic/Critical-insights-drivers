@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://critical-insights.local/schemas/patient_alert.schema.json",
+  "title": "PatientAlert",
+  "type": "object",
+  "required": ["schema_version", "topic", "unique_device_identifier", "identifier", "text", "presentation_time"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "topic": { "const": "PatientAlert" },
+    "unique_device_identifier": { "type": "string", "minLength": 1 },
+    "identifier": { "type": ["string", "null"] },
+    "text": { "type": ["string", "null"] },
+    "priority": { "type": ["string", "null"] },
+    "presentation_time": { "type": "string", "format": "date-time" },
+    "gateway_id": { "type": "string" },
+    "bed_id": { "type": "string" },
+    "vendor": { "type": "string" },
+    "protocol": { "type": "string" }
+  },
+  "additionalProperties": true
+}

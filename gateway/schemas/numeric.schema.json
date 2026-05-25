@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://critical-insights.local/schemas/numeric.schema.json",
+  "title": "Numeric",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "topic",
+    "unique_device_identifier",
+    "metric_id",
+    "vendor_metric_id",
+    "instance_id",
+    "unit_id",
+    "value",
+    "presentation_time"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "topic": { "const": "Numeric" },
+    "unique_device_identifier": { "type": "string", "minLength": 1 },
+    "metric_id": { "type": "string", "minLength": 1 },
+    "vendor_metric_id": { "type": ["string", "null"] },
+    "instance_id": { "type": "integer", "minimum": 0 },
+    "unit_id": { "type": ["string", "null"] },
+    "value": { "type": ["number", "null"] },
+    "device_time": { "type": ["string", "null"], "format": "date-time" },
+    "presentation_time": { "type": "string", "format": "date-time" },
+    "gateway_id": { "type": "string" },
+    "bed_id": { "type": "string" },
+    "vendor": { "type": "string" },
+    "protocol": { "type": "string" }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,32 @@
+apply plugin: 'java'
+apply plugin: 'application'
+
+defaultTasks 'build'
+
+ext {
+    CI_JAVA_VERSION = project.hasProperty('JAVA_VERSION_SOURCE') ? JAVA_VERSION_SOURCE : 17
+    CI_SLF4J_VERSION = project.hasProperty('SLF4J_VERSION') ? SLF4J_VERSION : '2.0.3'
+}
+
+sourceCompatibility = CI_JAVA_VERSION
+targetCompatibility = CI_JAVA_VERSION
+
+application {
+    mainClass = 'org.mdpnp.simulator.runtime.SimulatorRuntimeApp'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation group: 'org.slf4j', name: 'slf4j-api', version: CI_SLF4J_VERSION
+    runtimeOnly group: 'org.slf4j', name: 'slf4j-simple', version: CI_SLF4J_VERSION
+}
+
+tasks.register('runSimulatorRuntime', JavaExec) {
+    group = 'application'
+    description = 'Run the extensible medical device simulator runtime'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'org.mdpnp.simulator.runtime.SimulatorRuntimeApp'
+}

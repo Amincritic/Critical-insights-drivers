@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://critical-insights.local/schemas/patient_demographics.schema.json",
+  "title": "PatientDemographics",
+  "type": "object",
+  "required": ["schema_version", "topic", "unique_device_identifier", "presentation_time"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "topic": { "const": "PatientDemographics" },
+    "unique_device_identifier": { "type": "string", "minLength": 1 },
+    "mrn": { "type": ["string", "null"] },
+    "given_name": { "type": ["string", "null"] },
+    "family_name": { "type": ["string", "null"] },
+    "date_of_birth": { "type": ["string", "null"], "format": "date-time" },
+    "sex": { "type": ["string", "null"] },
+    "patient_type": { "type": ["string", "null"] },
+    "presentation_time": { "type": "string", "format": "date-time" },
+    "gateway_id": { "type": "string" },
+    "bed_id": { "type": "string" },
+    "vendor": { "type": "string" },
+    "protocol": { "type": "string" }
+  },
+  "additionalProperties": true
+}

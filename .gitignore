@@ -1,7 +1,8 @@
+.DS_Store
 .gradle/
 build/
 **/build/
-gradle/wrapper/gradle-7.6-bin.zip
 *.class
 *.jar
-!gradle/wrapper/gradle-wrapper.jar
+!gateway/gradle/wrapper/gradle-wrapper.jar
+gateway/gradle/wrapper/gradle-7.6-bin.zip

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://critical-insights.local/schemas/sample_array.schema.json",
+  "title": "SampleArray",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "topic",
+    "unique_device_identifier",
+    "metric_id",
+    "vendor_metric_id",
+    "instance_id",
+    "unit_id",
+    "frequency",
+    "values",
+    "presentation_time"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "topic": { "const": "SampleArray" },
+    "unique_device_identifier": { "type": "string", "minLength": 1 },
+    "metric_id": { "type": "string", "minLength": 1 },
+    "vendor_metric_id": { "type": ["string", "null"] },
+    "instance_id": { "type": "integer", "minimum": 0 },
+    "unit_id": { "type": ["string", "null"] },
+    "frequency": { "type": ["integer", "null"], "minimum": 0 },
+    "values": {
+      "type": "array",
+      "items": { "type": "number" },
+      "maxItems": 1024
+    },
+    "device_time": { "type": ["string", "null"], "format": "date-time" },
+    "presentation_time": { "type": "string", "format": "date-time" },
+    "gateway_id": { "type": "string" },
+    "bed_id": { "type": "string" },
+    "vendor": { "type": "string" },
+    "protocol": { "type": "string" }
+  },
+  "additionalProperties": true
+}

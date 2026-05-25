@@ -1,0 +1,28 @@
+apply plugin: 'java'
+apply plugin: 'application'
+
+defaultTasks 'build'
+
+sourceCompatibility = JAVA_VERSION_SOURCE
+targetCompatibility = JAVA_VERSION_CLASSES
+
+
+application {
+    mainClass = 'org.mdpnp.devices.headless.runtime.HeadlessGatewayRuntimeApp'
+    applicationName = 'gateway-runtime'
+}
+
+dependencies {
+    implementation group: 'org.slf4j', name: 'slf4j-api', version: SLF4J_VERSION
+	runtimeOnly group: 'org.slf4j', name: 'slf4j-simple', version: SLF4J_VERSION
+    implementation project(':devices:common')
+    implementation project(':devices:philips-intellivue')
+    implementation project(':devices:draeger-medibus')
+}
+
+tasks.register('runHeadlessGatewayRuntime', JavaExec) {
+    group = 'application'
+    description = 'Run Philips and Draeger headless JSON gateways in one process with one shared queue/publisher'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'org.mdpnp.devices.headless.runtime.HeadlessGatewayRuntimeApp'
+}
