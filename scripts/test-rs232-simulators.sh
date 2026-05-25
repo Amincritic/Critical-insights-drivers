@@ -95,6 +95,7 @@ SIM_PID=$!
 ./scripts/run-gateway.sh --multi \
   --philips-serial "$PHILIPS_GATEWAY" \
   --draeger-serial "$DRAEGER_GATEWAY" \
+  --draeger-parity none \
   --web-port "$WEB_PORT" \
   --jsonl "$JSONL" \
   --stdout false \
@@ -102,7 +103,7 @@ SIM_PID=$!
 GW_PID=$!
 
 for _ in $(seq 1 80); do
-    curl -fsS "http://localhost:${WEB_PORT}/api/latest" >/dev/null || true
+    curl -fsS "http://localhost:${WEB_PORT}/api/latest" >/dev/null 2>&1 || true
     if [ -f "$JSONL" ] &&
        grep -q '"vendor":"draeger"' "$JSONL" &&
        grep -q '"topic":"Numeric".*"vendor":"draeger"' "$JSONL" &&
