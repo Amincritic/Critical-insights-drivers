@@ -496,11 +496,11 @@ public class IntellivueSimulatorV2 {
         ByteBuffer pps = ByteBuffer.allocate(64);
         pps.order(ByteOrder.BIG_ENDIAN);
         pps.putInt(0x80000000);       // pollProfileRevision
-        pps.putInt(80000);            // minPollPeriod (RelativeTime): 80000 x 125us = 10s
+        pps.putInt(8000);             // minPollPeriod (RelativeTime): 8000 x 125us = 1s
         pps.putInt(1456);             // maxMtuRx
         pps.putInt(1456);             // maxMtuTx
         pps.putInt(0x00000000);       // maxBwTx
-        pps.putInt(0x60000000);       // poll profile options
+        pps.putInt(0x8E000000);       // poll profile options: realtime numerics + waves + enum + prio list
         // optionalPackages (AttributeValueList: count=0, length=0)
         pps.putShort((short) 0);      // count
         pps.putShort((short) 0);      // length

@@ -47,9 +47,11 @@ import org.mdpnp.devices.philips.intellivue.data.UnitCode;
 public class HeadlessPhilipsIntellivue extends Intellivue {
     private static final long EXTENDED_POLL_ACTIVE_MS = 30000L;
     private static final long EXTENDED_POLL_RENEW_MS = 25000L;
-    private static final long PATIENT_POLL_MS = 10000L;
-    private static final long KEEP_ALIVE_MS = 8000L;
-    private static final long STARTUP_POLL_DELAY_MS = 500L;
+    // Philips allows at most one message per second per poll type. Keep the
+    // non-realtime polls comfortably above that while still refreshing early.
+    private static final long PATIENT_POLL_MS = 2000L;
+    private static final long KEEP_ALIVE_MS = 5000L;
+    private static final long STARTUP_POLL_DELAY_MS = 250L;
     private final String gatewayId;
     private final String bedId;
     private final String deviceId;
@@ -119,7 +121,7 @@ public class HeadlessPhilipsIntellivue extends Intellivue {
                             if (keepAliveInvoke >= 0) { System.err.println("Philips keepalive poll sent, invoke=" + keepAliveInvoke); }
                             lastKeepAlive = now;
                         }
-                        Thread.sleep(500);
+                        Thread.sleep(250);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                         break;
