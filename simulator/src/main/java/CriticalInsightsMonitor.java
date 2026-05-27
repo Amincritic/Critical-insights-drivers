@@ -12,6 +12,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
+import java.util.prefs.Preferences;
 import javax.imageio.ImageIO;
 
 /**
@@ -29,6 +30,13 @@ import javax.imageio.ImageIO;
  *   ../scripts/run-simulator-gui.sh
  */
 public class CriticalInsightsMonitor extends JFrame {
+    private enum DeviceUiState {
+        STOPPED,
+        STARTING,
+        CONNECTED,
+        RECONNECTING,
+        FAULT
+    }
 
     // =====================================================================
     // Protocol Constants -- Draeger MEDIBUS
@@ -184,8 +192,13 @@ public class CriticalInsightsMonitor extends JFrame {
     // =====================================================================
     // Shared state
     // =====================================================================
+    private final Preferences prefs = Preferences.userNodeForPackage(CriticalInsightsMonitor.class);
     private final AtomicBoolean draegerRunning = new AtomicBoolean(false);
     private final AtomicBoolean philipsRunning = new AtomicBoolean(false);
+    private volatile DeviceUiState draegerUiState = DeviceUiState.STOPPED;
+    private volatile DeviceUiState philipsUiState = DeviceUiState.STOPPED;
+    private volatile String draegerUiMessage = "Stopped";
+    private volatile String philipsUiMessage = "Stopped";
     private Thread draegerThread;
     private Thread philipsThread;
     private Process draegerSerialProcess;
@@ -305,14 +318,20 @@ public class CriticalInsightsMonitor extends JFrame {
     private final JComboBox<String> phSweepSpeed = makeDarkCombo(new String[]{"25 mm/s", "12.5 mm/s", "50 mm/s"});
     private final JButton drFreezeBtn = makeDarkButton("Freeze");
     private final JButton phFreezeBtn = makeDarkButton("Freeze");
+    private final JButton drOptionsBtn = makeDarkButton("Options \u25BE");
+    private final JButton phOptionsBtn = makeDarkButton("Options \u25BE");
     private final JCheckBox chkNoise = makeDarkCheck("Add Noise");
     private final JCheckBox chkPhNoise = makeDarkCheck("Add Noise");
+    private final JCheckBox drAdvancedToggle = makeDarkCheck("Advanced");
+    private final JCheckBox phAdvancedToggle = makeDarkCheck("Advanced");
 
     // Scenario combos
     private final JComboBox<String> drScenarioCombo = makeDarkCombo(
             new String[]{"-- Scenario --", "Normal", "ARDS", "COPD", "Weaning", "Apnea"});
     private final JComboBox<String> phScenarioCombo = makeDarkCombo(
             new String[]{"-- Scenario --", "Normal", "Tachycardia", "Bradycardia", "Hypotension", "Cardiac Arrest", "Septic Shock"});
+    private final JComboBox<String> drViewCombo = makeDarkCombo(new String[]{"Monitor", "Setup", "Review"});
+    private final JComboBox<String> phViewCombo = makeDarkCombo(new String[]{"Monitor", "Setup", "Review"});
 
     // ECG rhythm combo
     private final JComboBox<String> ecgRhythmCombo = makeDarkCombo(
@@ -332,6 +351,18 @@ public class CriticalInsightsMonitor extends JFrame {
     // Log
     // =====================================================================
     private final JTextArea logArea = new JTextArea();
+    private final JTextArea drReviewArea = makeReviewTextArea();
+    private final JTextArea phReviewArea = makeReviewTextArea();
+    private final JTextArea drMonitorArea = makeReviewTextArea();
+    private final JTextArea phMonitorArea = makeReviewTextArea();
+    private final JLabel drMonitorScenarioValue = new JLabel("--");
+    private final JLabel drMonitorModeValue = new JLabel("--");
+    private final JLabel drMonitorWaveValue = new JLabel("--");
+    private final JLabel drMonitorNoiseValue = new JLabel("--");
+    private final JLabel phMonitorScenarioValue = new JLabel("--");
+    private final JLabel phMonitorRhythmValue = new JLabel("--");
+    private final JLabel phMonitorWaveValue = new JLabel("--");
+    private final JLabel phMonitorNbpValue = new JLabel("--");
 
     // =====================================================================
     // Waveform displays
@@ -442,6 +473,7 @@ public class CriticalInsightsMonitor extends JFrame {
 
     // Status bar
     private final JLabel statusBar = new JLabel("  Press F11 for fullscreen | Space to freeze | M to mute");
+    private final JLabel messageBar = new JLabel(" Ready");
 
     // Tabs reference
     private JTabbedPane mainTabs;
@@ -474,6 +506,14 @@ public class CriticalInsightsMonitor extends JFrame {
         mainTabs.addTab("Philips Monitor", buildPhilipsTab());
         mainTabs.addTab("Protocol Log", buildLogTab());
 
+        messageBar.setBackground(new Color(28, 28, 28));
+        messageBar.setForeground(new Color(0, 220, 170));
+        messageBar.setOpaque(true);
+        messageBar.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
+        messageBar.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(60, 60, 60)),
+            BorderFactory.createEmptyBorder(4, 8, 4, 8)));
+        add(messageBar, BorderLayout.NORTH);
         add(mainTabs, BorderLayout.CENTER);
 
         // Status bar
@@ -499,6 +539,7 @@ public class CriticalInsightsMonitor extends JFrame {
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
+                saveUiPreferences();
                 stopDraeger();
                 stopPhilips();
             }
@@ -506,10 +547,13 @@ public class CriticalInsightsMonitor extends JFrame {
         new javax.swing.Timer(1000, e -> writeSerialControlFiles()).start();
 
         ventModeCombo.setSelectedItem("SIMV");
+        loadUiPreferences();
 
         // Freeze buttons
         drFreezeBtn.addActionListener(e -> toggleFreeze());
         phFreezeBtn.addActionListener(e -> toggleFreeze());
+        configureOptionsPopup(drOptionsBtn, buildDraegerOptionsMenu(), drViewCombo, drAdvancedToggle, drFreezeBtn);
+        configureOptionsPopup(phOptionsBtn, buildPhilipsOptionsMenu(), phViewCombo, phAdvancedToggle, phFreezeBtn);
 
         // Mute buttons
         drMuteBtn.addActionListener(e -> toggleMute());
@@ -518,6 +562,11 @@ public class CriticalInsightsMonitor extends JFrame {
         // Scenario combos
         drScenarioCombo.addActionListener(e -> applyDraegerScenario());
         phScenarioCombo.addActionListener(e -> applyPhilipsScenario());
+        drViewCombo.setToolTipText("Switch between monitor, setup, and review views");
+        phViewCombo.setToolTipText("Switch between monitor, setup, and review views");
+        drAdvancedToggle.setToolTipText("Show the extra ventilator alarm controls");
+        phAdvancedToggle.setToolTipText("Show patient and alarm controls");
+        messageBar.setToolTipText("Live device state and connection status");
 
         // Slider tooltips
         slTidalVol.setToolTipText("Normal: 400-600 mL");
@@ -616,6 +665,8 @@ public class CriticalInsightsMonitor extends JFrame {
             }
         });
 
+        refreshMonitorViews();
+        updateDeviceUiState();
         setPreferredSize(new Dimension(1400, 900));
         setMinimumSize(new Dimension(1100, 750));
         pack();
@@ -709,8 +760,8 @@ public class CriticalInsightsMonitor extends JFrame {
             this.vertScale = new double[numTraces];
             Arrays.fill(vertScale, 1.0);
             setBackground(DARK_BG);
-            setMinimumSize(new Dimension(300, 100));
-            setPreferredSize(new Dimension(700, 280));
+            setMinimumSize(new Dimension(420, 180));
+            setPreferredSize(new Dimension(920, 320));
 
             // Context menu
             JPopupMenu popup = new JPopupMenu();
@@ -917,20 +968,27 @@ public class CriticalInsightsMonitor extends JFrame {
         northPanel.add(buildAlarmBar(drAlarmBar, drMuteBtn), BorderLayout.SOUTH);
         tab.add(northPanel, BorderLayout.NORTH);
 
-        JSplitPane hSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, drWavePanel, buildDraegerNumericsPanel());
+        JSplitPane hSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, drWavePanel, buildVitalsScrollPane(buildDraegerNumericsPanel()));
         hSplit.setBackground(DARK_BG);
-        hSplit.setDividerLocation(800);
-        hSplit.setResizeWeight(0.75);
+        hSplit.setDividerLocation(0.82);
+        hSplit.setResizeWeight(0.84);
         hSplit.setDividerSize(5);
         hSplit.setContinuousLayout(true);
+        hSplit.setOneTouchExpandable(true);
+
+        JPanel liveSurface = new JPanel(new BorderLayout(0, 4));
+        liveSurface.setBackground(DARK_BG);
+        liveSurface.add(buildLiveSurfaceHeader("Draeger Live Monitor", drOptionsBtn), BorderLayout.NORTH);
+        liveSurface.add(hSplit, BorderLayout.CENTER);
 
         JPanel controlsArea = buildDraegerControlsArea();
-        JSplitPane vSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT, hSplit, controlsArea);
+        JSplitPane vSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT, liveSurface, controlsArea);
         vSplit.setBackground(DARK_BG);
         vSplit.setDividerLocation(300);
-        vSplit.setResizeWeight(0.4);
+        vSplit.setResizeWeight(0.8);
         vSplit.setDividerSize(5);
         vSplit.setContinuousLayout(true);
+        vSplit.setOneTouchExpandable(true);
 
         tab.add(vSplit, BorderLayout.CENTER);
 
@@ -998,7 +1056,7 @@ public class CriticalInsightsMonitor extends JFrame {
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBackground(DARK_BG);
         panel.setMinimumSize(new Dimension(180, 0));
-        panel.setPreferredSize(new Dimension(310, 0));
+        panel.setPreferredSize(new Dimension(270, 680));
         panel.setBorder(BorderFactory.createMatteBorder(0, 2, 0, 0, new Color(60, 60, 60)));
 
         Color yellow  = DR_TRACE_COLORS[0];
@@ -1032,7 +1090,23 @@ public class CriticalInsightsMonitor extends JFrame {
             BorderFactory.createEmptyBorder(6, 10, 6, 10)
         ));
 
-        // Title row with scenario
+        outer.add(buildDeviceViewBar("Draeger", drViewCombo), BorderLayout.NORTH);
+
+        JPanel cards = new JPanel(new CardLayout());
+        cards.setBackground(PANEL_BG);
+        cards.add(buildDraegerMonitorPanel(), "Monitor");
+        cards.add(buildDraegerSetupPanel(), "Setup");
+        cards.add(buildDraegerReviewPanel(), "Review");
+        drViewCombo.addActionListener(e -> showCard(cards, drViewCombo));
+        outer.add(cards, BorderLayout.CENTER);
+        showCard(cards, drViewCombo);
+        return outer;
+    }
+
+    private JPanel buildDraegerSetupPanel() {
+        JPanel outer = new JPanel(new BorderLayout(0, 4));
+        outer.setBackground(PANEL_BG);
+
         JPanel titleRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         titleRow.setBackground(PANEL_BG);
         JLabel title = new JLabel("Vital Controls");
@@ -1043,6 +1117,7 @@ public class CriticalInsightsMonitor extends JFrame {
         titleRow.add(makeBoldLabel("Scenario:", 14));
         titleRow.add(drScenarioCombo);
         titleRow.add(Box.createHorizontalStrut(10));
+        titleRow.add(drAdvancedToggle);
         titleRow.add(chkNoise);
 
         JPanel sliders = new JPanel(new GridLayout(4, 2, 16, 6));
@@ -1063,16 +1138,68 @@ public class CriticalInsightsMonitor extends JFrame {
         bottomRow.add(makeBoldLabel("Mode:", 14));
         bottomRow.add(ventModeCombo);
         bottomRow.add(chkDrWaveforms);
-        bottomRow.add(Box.createHorizontalStrut(20));
-        bottomRow.add(makeBoldLabel("Alarms:", 14));
-        bottomRow.add(chkPawHigh);
-        bottomRow.add(chkApnea);
-        bottomRow.add(chkO2High);
-        bottomRow.add(chkMinVolLow);
+
+        JPanel advancedRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 4));
+        advancedRow.setBackground(PANEL_BG);
+        advancedRow.add(makeBoldLabel("Alarms:", 14));
+        advancedRow.add(chkPawHigh);
+        advancedRow.add(chkApnea);
+        advancedRow.add(chkO2High);
+        advancedRow.add(chkMinVolLow);
+        advancedRow.setVisible(drAdvancedToggle.isSelected());
+        drAdvancedToggle.addActionListener(e -> advancedRow.setVisible(drAdvancedToggle.isSelected()));
 
         outer.add(titleRow, BorderLayout.NORTH);
         outer.add(sliders, BorderLayout.CENTER);
-        outer.add(bottomRow, BorderLayout.SOUTH);
+        JPanel south = new JPanel(new BorderLayout(0, 4));
+        south.setBackground(PANEL_BG);
+        south.add(bottomRow, BorderLayout.NORTH);
+        south.add(advancedRow, BorderLayout.SOUTH);
+        outer.add(south, BorderLayout.SOUTH);
+        return outer;
+    }
+
+    private JPanel buildDraegerMonitorPanel() {
+        JPanel outer = new JPanel(new BorderLayout(0, 4));
+        outer.setBackground(PANEL_BG);
+        outer.setBorder(BorderFactory.createEmptyBorder(6, 0, 6, 0));
+
+        JPanel summary = new JPanel(new GridLayout(2, 2, 10, 10));
+        summary.setBackground(PANEL_BG);
+        summary.add(buildSummaryTile("Scenario", drMonitorScenarioValue, new Color(90, 140, 255)));
+        summary.add(buildSummaryTile("Mode", drMonitorModeValue, new Color(140, 200, 255)));
+        summary.add(buildSummaryTile("Waveforms", drMonitorWaveValue, new Color(120, 220, 140)));
+        summary.add(buildSummaryTile("Noise", drMonitorNoiseValue, new Color(220, 180, 80)));
+
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 4));
+        actions.setBackground(PANEL_BG);
+        JButton freeze = makeDarkButton("Freeze/Resume");
+        freeze.addActionListener(e -> toggleFreeze());
+        JButton mute = makeDarkButton("Mute/Unmute");
+        mute.addActionListener(e -> toggleMute());
+        JButton shot = makeDarkButton("Screenshot");
+        shot.addActionListener(e -> takeScreenshot());
+        actions.add(freeze);
+        actions.add(mute);
+        actions.add(shot);
+
+        JPanel state = new JPanel(new BorderLayout(0, 4));
+        state.setBackground(PANEL_BG);
+        drMonitorArea.setText(buildDraegerMonitorText());
+        state.add(new JScrollPane(drMonitorArea), BorderLayout.CENTER);
+
+        outer.add(summary, BorderLayout.NORTH);
+        outer.add(state, BorderLayout.CENTER);
+        outer.add(actions, BorderLayout.SOUTH);
+        return outer;
+    }
+
+    private JPanel buildDraegerReviewPanel() {
+        JPanel outer = new JPanel(new BorderLayout(0, 4));
+        outer.setBackground(PANEL_BG);
+        outer.setBorder(BorderFactory.createEmptyBorder(6, 0, 6, 0));
+        drReviewArea.setText(buildDraegerReviewText());
+        outer.add(new JScrollPane(drReviewArea), BorderLayout.CENTER);
         return outer;
     }
 
@@ -1090,20 +1217,27 @@ public class CriticalInsightsMonitor extends JFrame {
         northPanel.add(buildAlarmBar(phAlarmBar, phMuteBtn), BorderLayout.SOUTH);
         tab.add(northPanel, BorderLayout.NORTH);
 
-        JSplitPane hSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, phWavePanel, buildPhilipsNumericsPanel());
+        JSplitPane hSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, phWavePanel, buildVitalsScrollPane(buildPhilipsNumericsPanel()));
         hSplit.setBackground(DARK_BG);
-        hSplit.setDividerLocation(800);
-        hSplit.setResizeWeight(0.7);
+        hSplit.setDividerLocation(0.82);
+        hSplit.setResizeWeight(0.84);
         hSplit.setDividerSize(5);
         hSplit.setContinuousLayout(true);
+        hSplit.setOneTouchExpandable(true);
+
+        JPanel liveSurface = new JPanel(new BorderLayout(0, 4));
+        liveSurface.setBackground(DARK_BG);
+        liveSurface.add(buildLiveSurfaceHeader("Philips Live Monitor", phOptionsBtn), BorderLayout.NORTH);
+        liveSurface.add(hSplit, BorderLayout.CENTER);
 
         JPanel controlsArea = buildPhilipsControlsArea();
-        JSplitPane vSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT, hSplit, controlsArea);
+        JSplitPane vSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT, liveSurface, controlsArea);
         vSplit.setBackground(DARK_BG);
         vSplit.setDividerLocation(300);
-        vSplit.setResizeWeight(0.4);
+        vSplit.setResizeWeight(0.8);
         vSplit.setDividerSize(5);
         vSplit.setContinuousLayout(true);
+        vSplit.setOneTouchExpandable(true);
 
         tab.add(vSplit, BorderLayout.CENTER);
 
@@ -1151,7 +1285,7 @@ public class CriticalInsightsMonitor extends JFrame {
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBackground(DARK_BG);
         panel.setMinimumSize(new Dimension(180, 0));
-        panel.setPreferredSize(new Dimension(330, 0));
+        panel.setPreferredSize(new Dimension(280, 760));
         panel.setBorder(BorderFactory.createMatteBorder(0, 2, 0, 0, new Color(60, 60, 60)));
 
         Color green  = PH_TRACE_COLORS[0];
@@ -1204,7 +1338,23 @@ public class CriticalInsightsMonitor extends JFrame {
             BorderFactory.createEmptyBorder(6, 10, 6, 10)
         ));
 
-        // Title row with scenario + rhythm
+        outer.add(buildDeviceViewBar("Philips", phViewCombo), BorderLayout.NORTH);
+
+        JPanel cards = new JPanel(new CardLayout());
+        cards.setBackground(PANEL_BG);
+        cards.add(buildPhilipsMonitorPanel(), "Monitor");
+        cards.add(buildPhilipsSetupPanel(), "Setup");
+        cards.add(buildPhilipsReviewPanel(), "Review");
+        phViewCombo.addActionListener(e -> showCard(cards, phViewCombo));
+        outer.add(cards, BorderLayout.CENTER);
+        showCard(cards, phViewCombo);
+        return outer;
+    }
+
+    private JPanel buildPhilipsSetupPanel() {
+        JPanel outer = new JPanel(new BorderLayout(0, 4));
+        outer.setBackground(PANEL_BG);
+
         JPanel titleRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         titleRow.setBackground(PANEL_BG);
         JLabel title = new JLabel("Vital Controls");
@@ -1218,6 +1368,7 @@ public class CriticalInsightsMonitor extends JFrame {
         titleRow.add(makeBoldLabel("Rhythm:", 14));
         titleRow.add(ecgRhythmCombo);
         titleRow.add(Box.createHorizontalStrut(10));
+        titleRow.add(phAdvancedToggle);
         titleRow.add(chkPhNoise);
         titleRow.add(Box.createHorizontalStrut(10));
         titleRow.add(chkNbpCycle);
@@ -1243,28 +1394,167 @@ public class CriticalInsightsMonitor extends JFrame {
         JPanel bottomRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 4));
         bottomRow.setBackground(PANEL_BG);
         bottomRow.add(chkPhWaveforms);
-        bottomRow.add(Box.createHorizontalStrut(10));
-        bottomRow.add(makeBoldLabel("Alarms:", 14));
-        bottomRow.add(chkPhHrAlarm);
-        bottomRow.add(chkPhSpo2Low);
-        bottomRow.add(chkPhAbpHigh);
-        bottomRow.add(Box.createHorizontalStrut(20));
-        bottomRow.add(makeBoldLabel("Patient:", 14));
-        bottomRow.add(makeBoldLabel("Name", 12));
-        bottomRow.add(tfPatientName);
-        bottomRow.add(makeBoldLabel("ID", 12));
-        bottomRow.add(tfPatientId);
-        bottomRow.add(makeBoldLabel("Sex", 12));
-        bottomRow.add(cbPatientSex);
-        bottomRow.add(makeBoldLabel("Ht", 12));
-        bottomRow.add(tfPatientHeight);
-        bottomRow.add(makeBoldLabel("Wt", 12));
-        bottomRow.add(tfPatientWeight);
+
+        JPanel advancedRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 4));
+        advancedRow.setBackground(PANEL_BG);
+        advancedRow.add(makeBoldLabel("Alarms:", 14));
+        advancedRow.add(chkPhHrAlarm);
+        advancedRow.add(chkPhSpo2Low);
+        advancedRow.add(chkPhAbpHigh);
+        advancedRow.add(Box.createHorizontalStrut(20));
+        advancedRow.add(makeBoldLabel("Patient:", 14));
+        advancedRow.add(makeBoldLabel("Name", 12));
+        advancedRow.add(tfPatientName);
+        advancedRow.add(makeBoldLabel("ID", 12));
+        advancedRow.add(tfPatientId);
+        advancedRow.add(makeBoldLabel("Sex", 12));
+        advancedRow.add(cbPatientSex);
+        advancedRow.add(makeBoldLabel("Ht", 12));
+        advancedRow.add(tfPatientHeight);
+        advancedRow.add(makeBoldLabel("Wt", 12));
+        advancedRow.add(tfPatientWeight);
+        advancedRow.setVisible(phAdvancedToggle.isSelected());
+        phAdvancedToggle.addActionListener(e -> advancedRow.setVisible(phAdvancedToggle.isSelected()));
 
         outer.add(titleRow, BorderLayout.NORTH);
         outer.add(sliders, BorderLayout.CENTER);
-        outer.add(bottomRow, BorderLayout.SOUTH);
+        JPanel south = new JPanel(new BorderLayout(0, 4));
+        south.setBackground(PANEL_BG);
+        south.add(bottomRow, BorderLayout.NORTH);
+        south.add(advancedRow, BorderLayout.SOUTH);
+        outer.add(south, BorderLayout.SOUTH);
         return outer;
+    }
+
+    private JPanel buildPhilipsMonitorPanel() {
+        JPanel outer = new JPanel(new BorderLayout(0, 4));
+        outer.setBackground(PANEL_BG);
+        outer.setBorder(BorderFactory.createEmptyBorder(6, 0, 6, 0));
+
+        JPanel summary = new JPanel(new GridLayout(2, 2, 10, 10));
+        summary.setBackground(PANEL_BG);
+        summary.add(buildSummaryTile("Scenario", phMonitorScenarioValue, new Color(90, 140, 255)));
+        summary.add(buildSummaryTile("Rhythm", phMonitorRhythmValue, new Color(140, 200, 255)));
+        summary.add(buildSummaryTile("Waveforms", phMonitorWaveValue, new Color(120, 220, 140)));
+        summary.add(buildSummaryTile("NBP Cycle", phMonitorNbpValue, new Color(220, 180, 80)));
+
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 4));
+        actions.setBackground(PANEL_BG);
+        JButton freeze = makeDarkButton("Freeze/Resume");
+        freeze.addActionListener(e -> toggleFreeze());
+        JButton mute = makeDarkButton("Mute/Unmute");
+        mute.addActionListener(e -> toggleMute());
+        JButton shot = makeDarkButton("Screenshot");
+        shot.addActionListener(e -> takeScreenshot());
+        actions.add(freeze);
+        actions.add(mute);
+        actions.add(shot);
+
+        phMonitorArea.setText(buildPhilipsMonitorText());
+        outer.add(summary, BorderLayout.NORTH);
+        outer.add(new JScrollPane(phMonitorArea), BorderLayout.CENTER);
+        outer.add(actions, BorderLayout.SOUTH);
+        return outer;
+    }
+
+    private JPanel buildPhilipsReviewPanel() {
+        JPanel outer = new JPanel(new BorderLayout(0, 4));
+        outer.setBackground(PANEL_BG);
+        outer.setBorder(BorderFactory.createEmptyBorder(6, 0, 6, 0));
+        phReviewArea.setText(buildPhilipsReviewText());
+        outer.add(new JScrollPane(phReviewArea), BorderLayout.CENTER);
+        return outer;
+    }
+
+    private JPanel buildLiveSurfaceHeader(String title, JButton optionsButton) {
+        JPanel header = new JPanel(new BorderLayout(0, 0));
+        header.setBackground(PANEL_BG);
+        header.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(60, 60, 60)),
+                BorderFactory.createEmptyBorder(6, 10, 6, 10)));
+
+        JLabel titleLabel = new JLabel(title);
+        titleLabel.setForeground(Color.WHITE);
+        titleLabel.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 15));
+        header.add(titleLabel, BorderLayout.WEST);
+
+        JPanel east = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        east.setBackground(PANEL_BG);
+
+        JLabel hint = new JLabel("Waveforms first, vitals in a fixed rail");
+        hint.setForeground(new Color(140, 140, 140));
+        hint.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
+        east.add(hint);
+        east.add(optionsButton);
+        header.add(east, BorderLayout.EAST);
+        return header;
+    }
+
+    private void configureOptionsPopup(JButton button, JPopupMenu menu, JComboBox<String> viewCombo, JCheckBox advancedToggle, JButton freezeButton) {
+        button.setToolTipText("Open quick actions and view options");
+        button.addActionListener(e -> {
+            Component target = e.getSource() instanceof Component ? (Component) e.getSource() : button;
+            menu.show(target, 0, target.getHeight());
+        });
+        button.setFocusable(false);
+        menu.addSeparator();
+        menu.add(wrapMenuItem("Freeze / Resume", e -> freezeButton.doClick()));
+        menu.add(wrapMenuItem("Mute / Unmute", e -> toggleMute()));
+        menu.add(wrapMenuItem("Screenshot", e -> takeScreenshot()));
+        menu.addSeparator();
+        JCheckBoxMenuItem advanced = new JCheckBoxMenuItem("Advanced controls");
+        advanced.setSelected(advancedToggle.isSelected());
+        advanced.addActionListener(e -> advancedToggle.setSelected(advanced.isSelected()));
+        menu.add(advanced);
+        advancedToggle.addActionListener(e -> advanced.setSelected(advancedToggle.isSelected()));
+        menu.addSeparator();
+        ButtonGroup group = new ButtonGroup();
+        for (int i = 0; i < viewCombo.getItemCount(); i++) {
+            final int idx = i;
+            JRadioButtonMenuItem item = new JRadioButtonMenuItem(viewCombo.getItemAt(i));
+            item.setSelected(i == viewCombo.getSelectedIndex());
+            item.addActionListener(e -> viewCombo.setSelectedIndex(idx));
+            group.add(item);
+            menu.add(item);
+        }
+    }
+
+    private JPopupMenu buildDraegerOptionsMenu() {
+        JPopupMenu menu = new JPopupMenu();
+        menu.add(makePopupHeader("Draeger Options"));
+        return menu;
+    }
+
+    private JPopupMenu buildPhilipsOptionsMenu() {
+        JPopupMenu menu = new JPopupMenu();
+        menu.add(makePopupHeader("Philips Options"));
+        return menu;
+    }
+
+    private JMenuItem wrapMenuItem(String text, ActionListener listener) {
+        JMenuItem item = new JMenuItem(text);
+        item.addActionListener(listener);
+        return item;
+    }
+
+    private JLabel makePopupHeader(String text) {
+        JLabel label = new JLabel(text);
+        label.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
+        label.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
+        label.setForeground(new Color(200, 200, 200));
+        return label;
+    }
+
+    private JScrollPane buildVitalsScrollPane(JPanel panel) {
+        JScrollPane scroll = new JScrollPane(panel,
+                JScrollPane.VERTICAL_SCROLLBAR_ALWAYS,
+                JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 0, new Color(60, 60, 60)));
+        scroll.getViewport().setBackground(DARK_BG);
+        scroll.getVerticalScrollBar().setUnitIncrement(18);
+        scroll.getVerticalScrollBar().setBlockIncrement(90);
+        scroll.setPreferredSize(new Dimension(280, 440));
+        return scroll;
     }
 
     // =====================================================================
@@ -1464,6 +1754,118 @@ public class CriticalInsightsMonitor extends JFrame {
     // =====================================================================
     // Dark UI helpers
     // =====================================================================
+
+    private JTextArea makeReviewTextArea() {
+        JTextArea area = new JTextArea();
+        area.setEditable(false);
+        area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 13));
+        area.setBackground(new Color(15, 15, 15));
+        area.setForeground(new Color(0, 200, 170));
+        area.setCaretColor(new Color(0, 200, 170));
+        area.setLineWrap(true);
+        area.setWrapStyleWord(true);
+        area.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+        return area;
+    }
+
+    private JPanel buildDeviceViewBar(String deviceName, JComboBox<String> viewCombo) {
+        JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        bar.setBackground(PANEL_BG);
+        bar.setBorder(BorderFactory.createEmptyBorder(0, 0, 4, 0));
+
+        bar.add(makeBoldLabel(deviceName + " view:", 14));
+        bar.add(viewCombo);
+        bar.add(makeBoldLabel("Monitor = quick status, Setup = controls, Review = read-only snapshot", 11));
+        return bar;
+    }
+
+    private void showCard(JPanel cards, JComboBox<String> combo) {
+        CardLayout layout = (CardLayout) cards.getLayout();
+        String selected = String.valueOf(combo.getSelectedItem());
+        layout.show(cards, selected);
+    }
+
+    private JPanel buildSummaryTile(String label, JLabel valueLabel, Color accent) {
+        JPanel tile = new JPanel(new BorderLayout(0, 0));
+        tile.setBackground(new Color(20, 20, 20));
+        tile.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 1, 1, 1, accent.darker()),
+                BorderFactory.createEmptyBorder(6, 8, 6, 8)));
+        tile.setPreferredSize(new Dimension(140, 48));
+        tile.setMaximumSize(new Dimension(160, 48));
+
+        JLabel key = new JLabel(label.toUpperCase(Locale.ROOT));
+        key.setForeground(accent.brighter());
+        key.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 10));
+
+        valueLabel.setForeground(Color.WHITE);
+        valueLabel.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 14));
+
+        tile.add(key, BorderLayout.NORTH);
+        tile.add(valueLabel, BorderLayout.CENTER);
+        return tile;
+    }
+
+    private String valueOrDash(String value) {
+        if (value == null) return "--";
+        String trimmed = value.trim();
+        return trimmed.isEmpty() || trimmed.startsWith("--") ? "--" : trimmed;
+    }
+
+    private String blankOr(String value, String fallback) {
+        if (value == null) return fallback;
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? fallback : trimmed;
+    }
+
+    private String buildDraegerReviewText() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Transport: ").append(valueOrDash((String) draegerTransportCombo.getSelectedItem())).append('\n');
+        sb.append("Port/Path: ").append("RS232".equals(draegerTransportCombo.getSelectedItem()) ? blankOr(draegerSerialField.getText(), "--") : blankOr(draegerPortField.getText(), "--")).append('\n');
+        sb.append("Model: ").append(valueOrDash((String) modelCombo.getSelectedItem())).append('\n');
+        sb.append("Status: ").append(blankOr(draegerStatus.getText(), "Stopped")).append('\n');
+        sb.append("Connection: ").append(blankOr(draegerConnStatus.getText(), "No connection")).append('\n');
+        sb.append("Scenario: ").append(valueOrDash((String) drScenarioCombo.getSelectedItem())).append('\n');
+        sb.append("Mode: ").append(valueOrDash((String) ventModeCombo.getSelectedItem())).append('\n');
+        sb.append("Waveforms: ").append(chkDrWaveforms.isSelected() ? "On" : "Off").append("  Noise: ").append(chkNoise.isSelected() ? "On" : "Off").append('\n');
+        sb.append("Vitals: VT ").append(slTidalVol.getValue()).append(" mL");
+        sb.append(" RR ").append(slRespRate.getValue()).append("/min");
+        sb.append(" Paw ").append(slPeakPres.getValue()).append(" mbar");
+        sb.append(" PEEP ").append(slPeep.getValue()).append(" mbar").append('\n');
+        sb.append("       FiO2 ").append(slFio2.getValue()).append("%");
+        sb.append(" Compl ").append(slCompliance.getValue()).append(" L/bar");
+        sb.append(" Resist ").append(slResistance.getValue()).append(" mbar/L/s");
+        sb.append(" Temp ").append(slAirwayTemp.getValue()).append(" C").append('\n');
+        sb.append("Alarms: ").append(blankOr(drAlarmBar.getText(), "none")).append('\n');
+        sb.append("Speed: ").append(valueOrDash((String) drSweepSpeed.getSelectedItem()));
+        return sb.toString();
+    }
+
+    private String buildPhilipsReviewText() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Transport: ").append(valueOrDash((String) philipsTransportCombo.getSelectedItem())).append('\n');
+        sb.append("Port/Path: ").append("MIB-RS232".equals(philipsTransportCombo.getSelectedItem()) ? blankOr(philipsSerialField.getText(), "--") : blankOr(philipsPortField.getText(), "--")).append('\n');
+        sb.append("Broadcast: ").append(chkBroadcast.isSelected() ? "On" : "Off").append('\n');
+        sb.append("Status: ").append(blankOr(philipsStatus.getText(), "Stopped")).append('\n');
+        sb.append("Connection: ").append(blankOr(philipsConnStatus.getText(), "No connection")).append('\n');
+        sb.append("Scenario: ").append(valueOrDash((String) phScenarioCombo.getSelectedItem())).append('\n');
+        sb.append("Rhythm: ").append(valueOrDash((String) ecgRhythmCombo.getSelectedItem())).append('\n');
+        sb.append("Waveforms: ").append(chkPhWaveforms.isSelected() ? "On" : "Off").append("  Noise: ").append(chkPhNoise.isSelected() ? "On" : "Off").append('\n');
+        sb.append("NBP auto-cycle: ").append(chkNbpCycle.isSelected() ? "On" : "Off").append("  Interval: ").append(valueOrDash((String) nbpIntervalCombo.getSelectedItem())).append('\n');
+        sb.append("Patient: ").append(blankOr(tfPatientName.getText(), "Unknown")).append("  ID ").append(blankOr(tfPatientId.getText(), "--")).append('\n');
+        sb.append("Sex ").append(valueOrDash((String) cbPatientSex.getSelectedItem()))
+          .append("  Ht ").append(blankOr(tfPatientHeight.getText(), "--"))
+          .append("  Wt ").append(blankOr(tfPatientWeight.getText(), "--")).append('\n');
+        sb.append("Vitals: HR ").append(slHeartRate.getValue()).append(" bpm");
+        sb.append(" SpO2 ").append(slSpo2.getValue()).append("%");
+        sb.append(" ABP ").append(lblPhAbp.getText()).append(' ').append(lblPhAbpM.getText()).append('\n');
+        sb.append("       NBP ").append(lblPhNbp.getText()).append(' ').append(lblPhNbpM.getText());
+        sb.append(" etCO2 ").append(slEtCo2.getValue()).append(" mmHg");
+        sb.append(" Temp ").append(lblPhTemp.getText()).append(" C").append('\n');
+        sb.append("Alarms: ").append(blankOr(phAlarmBar.getText(), "none")).append('\n');
+        sb.append("Signal: ").append(lblSpo2SQ.getText());
+        return sb.toString();
+    }
 
     private static JLabel makeBoldLabel(String text, int size) {
         JLabel l = new JLabel(text);
@@ -1913,6 +2315,87 @@ public class CriticalInsightsMonitor extends JFrame {
     // Status bar
     // =====================================================================
 
+    private void refreshMonitorViews() {
+        drMonitorScenarioValue.setText(valueOrDash((String) drScenarioCombo.getSelectedItem()));
+        drMonitorModeValue.setText(valueOrDash((String) ventModeCombo.getSelectedItem()));
+        drMonitorWaveValue.setText(chkDrWaveforms.isSelected() ? "On" : "Off");
+        drMonitorNoiseValue.setText(chkNoise.isSelected() ? "On" : "Off");
+        drMonitorArea.setText(buildDraegerMonitorText());
+        drReviewArea.setText(buildDraegerReviewText());
+
+        phMonitorScenarioValue.setText(valueOrDash((String) phScenarioCombo.getSelectedItem()));
+        phMonitorRhythmValue.setText(valueOrDash((String) ecgRhythmCombo.getSelectedItem()));
+        phMonitorWaveValue.setText(chkPhWaveforms.isSelected() ? "On" : "Off");
+        phMonitorNbpValue.setText(chkNbpCycle.isSelected() ? "On" : "Off");
+        phMonitorArea.setText(buildPhilipsMonitorText());
+        phReviewArea.setText(buildPhilipsReviewText());
+    }
+
+    private void refreshMessageBar() {
+        String drState = draegerUiState.name().toLowerCase(Locale.ROOT);
+        String phState = philipsUiState.name().toLowerCase(Locale.ROOT);
+        String text = "Draeger " + drState + ": " + draegerUiMessage + " | Philips " + phState + ": " + philipsUiMessage;
+        messageBar.setText(" " + text);
+        messageBar.setForeground(messageColor());
+    }
+
+    private Color messageColor() {
+        if (draegerUiState == DeviceUiState.FAULT || philipsUiState == DeviceUiState.FAULT) {
+            return new Color(255, 90, 90);
+        }
+        if (draegerUiState == DeviceUiState.RECONNECTING || philipsUiState == DeviceUiState.RECONNECTING) {
+            return new Color(255, 170, 80);
+        }
+        if (draegerUiState == DeviceUiState.STARTING || philipsUiState == DeviceUiState.STARTING) {
+            return new Color(220, 180, 80);
+        }
+        return new Color(0, 220, 170);
+    }
+
+    private String buildDraegerMonitorText() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Status: ").append(blankOr(draegerStatus.getText(), "Stopped")).append('\n');
+        sb.append("Connection: ").append(blankOr(draegerConnStatus.getText(), "No connection")).append('\n');
+        sb.append("Scenario: ").append(valueOrDash((String) drScenarioCombo.getSelectedItem())).append('\n');
+        sb.append("Mode: ").append(valueOrDash((String) ventModeCombo.getSelectedItem())).append('\n');
+        sb.append("Waveforms: ").append(chkDrWaveforms.isSelected() ? "On" : "Off");
+        sb.append("  Noise: ").append(chkNoise.isSelected() ? "On" : "Off").append('\n');
+        sb.append("Vitals: VT ").append(slTidalVol.getValue()).append(" mL");
+        sb.append(" RR ").append(slRespRate.getValue()).append("/min");
+        sb.append(" Paw ").append(slPeakPres.getValue()).append(" mbar");
+        sb.append(" PEEP ").append(slPeep.getValue()).append(" mbar").append('\n');
+        sb.append("       FiO2 ").append(slFio2.getValue()).append('%');
+        sb.append(" Compl ").append(slCompliance.getValue()).append(" L/bar");
+        sb.append(" Resist ").append(slResistance.getValue()).append(" mbar/L/s");
+        sb.append(" Temp ").append(slAirwayTemp.getValue()).append(" C").append('\n');
+        sb.append("Alarms: ").append(blankOr(drAlarmBar.getText(), "none")).append('\n');
+        sb.append("Speed: ").append(valueOrDash((String) drSweepSpeed.getSelectedItem()));
+        return sb.toString();
+    }
+
+    private String buildPhilipsMonitorText() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Status: ").append(blankOr(philipsStatus.getText(), "Stopped")).append('\n');
+        sb.append("Connection: ").append(blankOr(philipsConnStatus.getText(), "No connection")).append('\n');
+        sb.append("Scenario: ").append(valueOrDash((String) phScenarioCombo.getSelectedItem())).append('\n');
+        sb.append("Rhythm: ").append(valueOrDash((String) ecgRhythmCombo.getSelectedItem())).append('\n');
+        sb.append("Waveforms: ").append(chkPhWaveforms.isSelected() ? "On" : "Off");
+        sb.append("  Noise: ").append(chkPhNoise.isSelected() ? "On" : "Off").append('\n');
+        sb.append("NBP auto-cycle: ").append(chkNbpCycle.isSelected() ? "On" : "Off");
+        sb.append("  Interval: ").append(valueOrDash((String) nbpIntervalCombo.getSelectedItem())).append('\n');
+        sb.append("Patient: ").append(blankOr(tfPatientName.getText(), "Unknown"));
+        sb.append("  ID ").append(blankOr(tfPatientId.getText(), "--")).append('\n');
+        sb.append("Vitals: HR ").append(slHeartRate.getValue()).append(" bpm");
+        sb.append(" SpO2 ").append(slSpo2.getValue()).append('%');
+        sb.append(" ABP ").append(lblPhAbp.getText()).append(' ').append(lblPhAbpM.getText()).append('\n');
+        sb.append("       NBP ").append(lblPhNbp.getText()).append(' ').append(lblPhNbpM.getText());
+        sb.append(" etCO2 ").append(slEtCo2.getValue()).append(" mmHg");
+        sb.append(" Temp ").append(lblPhTemp.getText()).append(" C").append('\n');
+        sb.append("Alarms: ").append(blankOr(phAlarmBar.getText(), "none")).append('\n');
+        sb.append("Signal: ").append(lblSpo2SQ.getText());
+        return sb.toString();
+    }
+
     private void updateStatusBar() {
         long uptimeMs = System.currentTimeMillis() - startTime;
         long uptimeSec = uptimeMs / 1000;
@@ -1925,6 +2408,8 @@ public class CriticalInsightsMonitor extends JFrame {
             ? new java.text.SimpleDateFormat("HH:mm:ss").format(new java.util.Date(lastPollTimestamp))
             : "--:--:--";
 
+        refreshMonitorViews();
+        refreshMessageBar();
         statusBar.setText(String.format("  Events/s: %.0f  |  Last poll: %s  |  Uptime: %s  |  Press F11 for fullscreen | Space to freeze | M to mute",
             eventsPerSecond, lastPoll, uptime));
     }
@@ -2307,21 +2792,184 @@ public class CriticalInsightsMonitor extends JFrame {
         });
     }
 
+    private void setMessage(String text, Color color) {
+        SwingUtilities.invokeLater(() -> {
+            messageBar.setText(" " + text);
+            messageBar.setForeground(color);
+        });
+    }
+
+    private void setDraegerUiState(DeviceUiState state, String message) {
+        draegerUiState = state;
+        draegerUiMessage = message;
+        SwingUtilities.invokeLater(() -> {
+            draegerStatus.setText(stateLabelText(state));
+            draegerStatus.setForeground(uiColorForState(state));
+        });
+        updateDeviceUiState();
+        setMessage("Draeger: " + message, uiColorForState(state));
+    }
+
+    private void setPhilipsUiState(DeviceUiState state, String message) {
+        philipsUiState = state;
+        philipsUiMessage = message;
+        SwingUtilities.invokeLater(() -> {
+            philipsStatus.setText(stateLabelText(state));
+            philipsStatus.setForeground(uiColorForState(state));
+        });
+        updateDeviceUiState();
+        setMessage("Philips: " + message, uiColorForState(state));
+    }
+
+    private String stateLabelText(DeviceUiState state) {
+        switch (state) {
+            case CONNECTED: return "Connected";
+            case STARTING: return "Starting";
+            case RECONNECTING: return "Reconnecting";
+            case FAULT: return "Fault";
+            default: return "Stopped";
+        }
+    }
+
+    private Color uiColorForState(DeviceUiState state) {
+        switch (state) {
+            case CONNECTED: return new Color(0, 220, 170);
+            case STARTING: return new Color(220, 180, 80);
+            case RECONNECTING: return new Color(255, 170, 80);
+            case FAULT: return new Color(255, 90, 90);
+            default: return new Color(170, 170, 170);
+        }
+    }
+
+    private void updateDeviceUiState() {
+        boolean draegerActive = draegerUiState != DeviceUiState.STOPPED;
+        boolean philipsActive = philipsUiState != DeviceUiState.STOPPED;
+
+        btnDraegerStart.setEnabled(!draegerActive);
+        btnDraegerStop.setEnabled(draegerActive);
+        btnPhilipsStart.setEnabled(!philipsActive);
+        btnPhilipsStop.setEnabled(philipsActive);
+
+        draegerTransportCombo.setEnabled(!draegerActive);
+        draegerPortField.setEnabled(!draegerActive && "TCP".equals(draegerTransportCombo.getSelectedItem()));
+        draegerSerialField.setEnabled(!draegerActive && "RS232".equals(draegerTransportCombo.getSelectedItem()));
+        modelCombo.setEnabled(!draegerActive);
+        phScenarioCombo.setEnabled(true);
+        drScenarioCombo.setEnabled(true);
+        ecgRhythmCombo.setEnabled(true);
+        phSweepSpeed.setEnabled(true);
+        drSweepSpeed.setEnabled(true);
+        chkBroadcast.setEnabled(!philipsActive && !"MIB-RS232".equals(philipsTransportCombo.getSelectedItem()));
+        philipsTransportCombo.setEnabled(!philipsActive);
+        philipsPortField.setEnabled(!philipsActive && "LAN/UDP".equals(philipsTransportCombo.getSelectedItem()));
+        philipsSerialField.setEnabled(!philipsActive && "MIB-RS232".equals(philipsTransportCombo.getSelectedItem()));
+
+        updateTransportFields();
+        refreshMonitorViews();
+    }
+
+    private void loadUiPreferences() {
+        draegerTransportCombo.setSelectedItem(prefs.get("draeger.transport", "TCP"));
+        draegerPortField.setText(prefs.get("draeger.port", draegerPortField.getText()));
+        draegerSerialField.setText(prefs.get("draeger.serial", draegerSerialField.getText()));
+        modelCombo.setSelectedItem(prefs.get("draeger.model", (String) modelCombo.getSelectedItem()));
+        drScenarioCombo.setSelectedItem(prefs.get("draeger.scenario", (String) drScenarioCombo.getSelectedItem()));
+        drSweepSpeed.setSelectedItem(prefs.get("draeger.speed", (String) drSweepSpeed.getSelectedItem()));
+        chkDrWaveforms.setSelected(prefs.getBoolean("draeger.waveforms", chkDrWaveforms.isSelected()));
+        chkNoise.setSelected(prefs.getBoolean("draeger.noise", chkNoise.isSelected()));
+        drAdvancedToggle.setSelected(prefs.getBoolean("draeger.advanced", drAdvancedToggle.isSelected()));
+
+        philipsTransportCombo.setSelectedItem(prefs.get("philips.transport", "LAN/UDP"));
+        philipsPortField.setText(prefs.get("philips.port", philipsPortField.getText()));
+        philipsSerialField.setText(prefs.get("philips.serial", philipsSerialField.getText()));
+        phScenarioCombo.setSelectedItem(prefs.get("philips.scenario", (String) phScenarioCombo.getSelectedItem()));
+        phSweepSpeed.setSelectedItem(prefs.get("philips.speed", (String) phSweepSpeed.getSelectedItem()));
+        chkPhWaveforms.setSelected(prefs.getBoolean("philips.waveforms", chkPhWaveforms.isSelected()));
+        chkPhNoise.setSelected(prefs.getBoolean("philips.noise", chkPhNoise.isSelected()));
+        phAdvancedToggle.setSelected(prefs.getBoolean("philips.advanced", phAdvancedToggle.isSelected()));
+        chkNbpCycle.setSelected(prefs.getBoolean("philips.nbpCycle", chkNbpCycle.isSelected()));
+        nbpIntervalCombo.setSelectedItem(prefs.get("philips.nbpInterval", (String) nbpIntervalCombo.getSelectedItem()));
+        ecgRhythmCombo.setSelectedItem(prefs.get("philips.rhythm", (String) ecgRhythmCombo.getSelectedItem()));
+        tfPatientName.setText(prefs.get("patient.name", tfPatientName.getText()));
+        tfPatientId.setText(prefs.get("patient.id", tfPatientId.getText()));
+        tfPatientDob.setText(prefs.get("patient.dob", tfPatientDob.getText()));
+        cbPatientSex.setSelectedItem(prefs.get("patient.sex", (String) cbPatientSex.getSelectedItem()));
+        tfPatientHeight.setText(prefs.get("patient.height", tfPatientHeight.getText()));
+        tfPatientWeight.setText(prefs.get("patient.weight", tfPatientWeight.getText()));
+
+        int selectedTab = prefs.getInt("window.tab", 0);
+        int selectedDraegerView = prefs.getInt("draeger.view", 0);
+        int selectedPhilipsView = prefs.getInt("philips.view", 0);
+        int x = prefs.getInt("window.x", Integer.MIN_VALUE);
+        int y = prefs.getInt("window.y", Integer.MIN_VALUE);
+        int w = prefs.getInt("window.w", -1);
+        int h = prefs.getInt("window.h", -1);
+        if (x != Integer.MIN_VALUE && y != Integer.MIN_VALUE && w > 0 && h > 0) {
+            setBounds(x, y, w, h);
+        }
+        mainTabs.setSelectedIndex(Math.max(0, Math.min(mainTabs.getTabCount() - 1, selectedTab)));
+        drViewCombo.setSelectedIndex(Math.max(0, Math.min(drViewCombo.getItemCount() - 1, selectedDraegerView)));
+        phViewCombo.setSelectedIndex(Math.max(0, Math.min(phViewCombo.getItemCount() - 1, selectedPhilipsView)));
+        updateDeviceUiState();
+    }
+
+    private void saveUiPreferences() {
+        prefs.put("draeger.transport", String.valueOf(draegerTransportCombo.getSelectedItem()));
+        prefs.put("draeger.port", draegerPortField.getText().trim());
+        prefs.put("draeger.serial", draegerSerialField.getText().trim());
+        prefs.put("draeger.model", String.valueOf(modelCombo.getSelectedItem()));
+        prefs.put("draeger.scenario", String.valueOf(drScenarioCombo.getSelectedItem()));
+        prefs.put("draeger.speed", String.valueOf(drSweepSpeed.getSelectedItem()));
+        prefs.putBoolean("draeger.waveforms", chkDrWaveforms.isSelected());
+        prefs.putBoolean("draeger.noise", chkNoise.isSelected());
+        prefs.putBoolean("draeger.advanced", drAdvancedToggle.isSelected());
+
+        prefs.put("philips.transport", String.valueOf(philipsTransportCombo.getSelectedItem()));
+        prefs.put("philips.port", philipsPortField.getText().trim());
+        prefs.put("philips.serial", philipsSerialField.getText().trim());
+        prefs.put("philips.scenario", String.valueOf(phScenarioCombo.getSelectedItem()));
+        prefs.put("philips.speed", String.valueOf(phSweepSpeed.getSelectedItem()));
+        prefs.putBoolean("philips.waveforms", chkPhWaveforms.isSelected());
+        prefs.putBoolean("philips.noise", chkPhNoise.isSelected());
+        prefs.putBoolean("philips.advanced", phAdvancedToggle.isSelected());
+        prefs.putBoolean("philips.nbpCycle", chkNbpCycle.isSelected());
+        prefs.put("philips.nbpInterval", String.valueOf(nbpIntervalCombo.getSelectedItem()));
+        prefs.put("philips.rhythm", String.valueOf(ecgRhythmCombo.getSelectedItem()));
+
+        prefs.put("patient.name", tfPatientName.getText().trim());
+        prefs.put("patient.id", tfPatientId.getText().trim());
+        prefs.put("patient.dob", tfPatientDob.getText().trim());
+        prefs.put("patient.sex", String.valueOf(cbPatientSex.getSelectedItem()));
+        prefs.put("patient.height", tfPatientHeight.getText().trim());
+        prefs.put("patient.weight", tfPatientWeight.getText().trim());
+
+        prefs.putInt("window.tab", mainTabs.getSelectedIndex());
+        prefs.putInt("draeger.view", drViewCombo.getSelectedIndex());
+        prefs.putInt("philips.view", phViewCombo.getSelectedIndex());
+        Rectangle b = getBounds();
+        prefs.putInt("window.x", b.x);
+        prefs.putInt("window.y", b.y);
+        prefs.putInt("window.w", b.width);
+        prefs.putInt("window.h", b.height);
+    }
+
     private void updateTransportFields() {
         boolean draegerSerial = "RS232".equals(draegerTransportCombo.getSelectedItem());
+        boolean draegerActive = draegerUiState != DeviceUiState.STOPPED;
         if (draegerSerial) {
             resolveSerialField(draegerSerialField);
         }
-        draegerPortField.setEnabled(!draegerSerial);
-        draegerSerialField.setEnabled(draegerSerial);
+        draegerPortField.setEnabled(!draegerActive && !draegerSerial);
+        draegerSerialField.setEnabled(!draegerActive && draegerSerial);
 
         boolean philipsSerial = "MIB-RS232".equals(philipsTransportCombo.getSelectedItem());
+        boolean philipsActive = philipsUiState != DeviceUiState.STOPPED;
         if (philipsSerial) {
             resolveSerialField(philipsSerialField);
         }
-        philipsPortField.setEnabled(!philipsSerial);
-        philipsSerialField.setEnabled(philipsSerial);
-        chkBroadcast.setEnabled(!philipsSerial);
+        philipsPortField.setEnabled(!philipsActive && !philipsSerial);
+        philipsSerialField.setEnabled(!philipsActive && philipsSerial);
+        chkBroadcast.setEnabled(!philipsActive && !philipsSerial);
     }
 
     private void resolveSerialField(JTextField field) {
@@ -2438,10 +3086,7 @@ public class CriticalInsightsMonitor extends JFrame {
         }
 
         draegerRunning.set(true);
-        btnDraegerStart.setEnabled(false);
-        btnDraegerStop.setEnabled(true);
-        draegerStatus.setText("Running");
-        draegerStatus.setForeground(new Color(0, 200, 0));
+        setDraegerUiState(DeviceUiState.STARTING, "Listening on port " + port);
 
         String model = (String) modelCombo.getSelectedItem();
         log("[Draeger] Starting on TCP port " + port + " model=" + model);
@@ -2471,14 +3116,12 @@ public class CriticalInsightsMonitor extends JFrame {
             startProcessLogReader("Draeger RS232", draegerSerialProcess);
         } catch (IOException e) {
             draegerRunning.set(false);
+            setDraegerUiState(DeviceUiState.FAULT, "Start failed: " + e.getMessage());
             JOptionPane.showMessageDialog(this, "Could not start Draeger RS232 simulator: " + e.getMessage());
             return;
         }
 
-        btnDraegerStart.setEnabled(false);
-        btnDraegerStop.setEnabled(true);
-        draegerStatus.setText("Running");
-        draegerStatus.setForeground(new Color(0, 200, 0));
+        setDraegerUiState(DeviceUiState.STARTING, "Serial process started");
         draegerConnStatus.setText("Serial: " + serialPath);
         log("[Draeger] Starting RS232 simulator on " + serialPath + " model=" + model);
     }
@@ -2493,10 +3136,7 @@ public class CriticalInsightsMonitor extends JFrame {
             }
         } catch (IOException ignored) {}
         closeDraegerClient();
-        btnDraegerStart.setEnabled(true);
-        btnDraegerStop.setEnabled(false);
-        draegerStatus.setText("Stopped");
-        draegerStatus.setForeground(Color.GRAY);
+        setDraegerUiState(DeviceUiState.STOPPED, "Stopped");
         draegerConnStatus.setText("No connection");
         drRealtimeEnabled = false;
         drRealtimeConfiguredCodes.clear();
@@ -2509,6 +3149,7 @@ public class CriticalInsightsMonitor extends JFrame {
             draegerServerSocket = new ServerSocket(port);
             draegerServerSocket.setSoTimeout(1000);
             log("[Draeger] Listening on port " + port);
+            setDraegerUiState(DeviceUiState.STARTING, "Listening on port " + port);
             while (draegerRunning.get()) {
                 try {
                     Socket client = draegerServerSocket.accept();
@@ -2517,16 +3158,19 @@ public class CriticalInsightsMonitor extends JFrame {
                 }
             }
         } catch (IOException e) {
-            if (draegerRunning.get()) log("[Draeger] Error: " + e.getMessage());
+            if (draegerRunning.get()) {
+                log("[Draeger] Error: " + e.getMessage());
+                setDraegerUiState(DeviceUiState.FAULT, e.getMessage());
+            }
         }
     }
 
     private void replaceDraegerClient(Socket client) {
         closeDraegerClient();
         draegerClientSocket = client;
-        SwingUtilities.invokeLater(() ->
-            draegerConnStatus.setText("Connected: " + client.getRemoteSocketAddress()));
+        SwingUtilities.invokeLater(() -> draegerConnStatus.setText("Connected: " + client.getRemoteSocketAddress()));
         log("[Draeger] Gateway connected from " + client.getRemoteSocketAddress());
+        setDraegerUiState(DeviceUiState.CONNECTED, "Connected: " + client.getRemoteSocketAddress());
         drCommunicationInitialized = false;
         drRealtimeEnabled = false;
         drRealtimeConfiguredCodes.clear();
@@ -2538,6 +3182,11 @@ public class CriticalInsightsMonitor extends JFrame {
             if (draegerClientSocket == client) {
                 draegerClientSocket = null;
                 SwingUtilities.invokeLater(() -> draegerConnStatus.setText("Disconnected"));
+                if (draegerRunning.get()) {
+                    setDraegerUiState(DeviceUiState.RECONNECTING, "Disconnected; waiting for reconnect");
+                } else {
+                    setDraegerUiState(DeviceUiState.STOPPED, "Stopped");
+                }
             }
         }, "draeger-sim-client");
         clientThread.setDaemon(true);
@@ -2587,7 +3236,10 @@ public class CriticalInsightsMonitor extends JFrame {
                 }
             }
         } catch (IOException e) {
-            if (draegerRunning.get()) log("[Draeger] Client error: " + e.getMessage());
+            if (draegerRunning.get()) {
+                log("[Draeger] Client error: " + e.getMessage());
+                setDraegerUiState(DeviceUiState.RECONNECTING, e.getMessage());
+            }
         }
     }
 
@@ -3162,10 +3814,7 @@ public class CriticalInsightsMonitor extends JFrame {
         }
 
         philipsRunning.set(true);
-        btnPhilipsStart.setEnabled(false);
-        btnPhilipsStop.setEnabled(true);
-        philipsStatus.setText("Running");
-        philipsStatus.setForeground(new Color(0, 200, 0));
+        setPhilipsUiState(DeviceUiState.STARTING, "Listening on port " + port);
         log("[Philips] Starting on UDP port " + port);
 
         philipsThread = new Thread(() -> runPhilipsServer(port), "philips-sim-ci");
@@ -3191,14 +3840,12 @@ public class CriticalInsightsMonitor extends JFrame {
             startProcessLogReader("Philips MIB-RS232", philipsSerialProcess);
         } catch (IOException e) {
             philipsRunning.set(false);
+            setPhilipsUiState(DeviceUiState.FAULT, "Start failed: " + e.getMessage());
             JOptionPane.showMessageDialog(this, "Could not start Philips MIB-RS232 simulator: " + e.getMessage());
             return;
         }
 
-        btnPhilipsStart.setEnabled(false);
-        btnPhilipsStop.setEnabled(true);
-        philipsStatus.setText("Running");
-        philipsStatus.setForeground(new Color(0, 200, 0));
+        setPhilipsUiState(DeviceUiState.STARTING, "Serial process started");
         philipsConnStatus.setText("Serial: " + serialPath);
         log("[Philips] Starting MIB-RS232 simulator on " + serialPath);
     }
@@ -3217,10 +3864,7 @@ public class CriticalInsightsMonitor extends JFrame {
             }
         } catch (Exception ignored) {}
         phAssociated = false;
-        btnPhilipsStart.setEnabled(true);
-        btnPhilipsStop.setEnabled(false);
-        philipsStatus.setText("Stopped");
-        philipsStatus.setForeground(Color.GRAY);
+        setPhilipsUiState(DeviceUiState.STOPPED, "Stopped");
         philipsConnStatus.setText("No connection");
         log("[Philips] Stopped");
     }
@@ -3231,6 +3875,7 @@ public class CriticalInsightsMonitor extends JFrame {
             philipsSocket.setSoTimeout(500);
             philipsSocket.setBroadcast(true);
             log("[Philips] Listening on UDP port " + port);
+            setPhilipsUiState(DeviceUiState.STARTING, "Listening on port " + port);
 
             broadcastExec = Executors.newSingleThreadScheduledExecutor(r -> {
                 Thread t = new Thread(r, "ph-broadcast-ci");
@@ -3267,6 +3912,7 @@ public class CriticalInsightsMonitor extends JFrame {
                         log("[Philips] <- Association Request from " + client);
                         SwingUtilities.invokeLater(() ->
                             philipsConnStatus.setText("Connected: " + client));
+                        setPhilipsUiState(DeviceUiState.CONNECTED, "Connected: " + client);
 
                         sendPhilipsAssocResponse(philipsSocket, client);
                         phAssociated = true;
@@ -3342,7 +3988,10 @@ public class CriticalInsightsMonitor extends JFrame {
                 }
             }
         } catch (IOException e) {
-            if (philipsRunning.get()) log("[Philips] Error: " + e.getMessage());
+            if (philipsRunning.get()) {
+                log("[Philips] Error: " + e.getMessage());
+                setPhilipsUiState(DeviceUiState.FAULT, e.getMessage());
+            }
         }
     }
 
