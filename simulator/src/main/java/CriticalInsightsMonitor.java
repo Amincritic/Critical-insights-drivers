@@ -305,10 +305,6 @@ public class CriticalInsightsMonitor extends JFrame {
     private final JLabel philipsStatus     = new JLabel("Stopped");
     private final JLabel draegerConnStatus = new JLabel("No connection");
     private final JLabel philipsConnStatus = new JLabel("No connection");
-    private final JLabel draegerTransportChip = new JLabel("--");
-    private final JLabel draegerProfileChip = new JLabel("--");
-    private final JLabel philipsTransportChip = new JLabel("--");
-    private final JLabel philipsProfileChip = new JLabel("--");
 
     private final JButton btnDraegerStart = makeDarkButton("Start");
     private final JButton btnDraegerStop  = makeDarkButton("Stop");
@@ -968,7 +964,7 @@ public class CriticalInsightsMonitor extends JFrame {
         // North panel: connection bar + alarm bar
         JPanel northPanel = new JPanel(new BorderLayout(0, 0));
         northPanel.setBackground(DARK_BG);
-        northPanel.add(buildDraegerHeaderBar(), BorderLayout.NORTH);
+        northPanel.add(buildDraegerConnectionBar(), BorderLayout.NORTH);
         northPanel.add(buildAlarmBar(drAlarmBar, drMuteBtn), BorderLayout.SOUTH);
         tab.add(northPanel, BorderLayout.NORTH);
 
@@ -1018,36 +1014,40 @@ public class CriticalInsightsMonitor extends JFrame {
         return bar;
     }
 
-    private JPanel buildDraegerHeaderBar() {
-        JPanel bar = new JPanel(new BorderLayout(12, 0));
-        bar.setBackground(new Color(24, 24, 24));
-        bar.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(55, 55, 55)),
-                BorderFactory.createEmptyBorder(8, 10, 8, 10)));
+    private JPanel buildDraegerConnectionBar() {
+        JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 6));
+        bar.setBackground(new Color(30, 30, 30));
+        bar.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(60, 60, 60)));
 
-        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
-        left.setBackground(bar.getBackground());
-        JLabel title = new JLabel("Draeger");
-        title.setForeground(Color.WHITE);
-        title.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 16));
-        left.add(title);
-        left.add(buildChip("State", draegerStatus, new Color(50, 80, 50)));
-        left.add(buildChip("Conn", draegerConnStatus, new Color(60, 60, 60)));
-        left.add(buildChip("Transport", draegerTransportChip, new Color(45, 60, 80)));
-        left.add(buildChip("Profile", draegerProfileChip, new Color(45, 45, 75)));
-        bar.add(left, BorderLayout.WEST);
+        bar.add(makeBoldLabel("Connection:", 14));
+        bar.add(makeBoldLabel("Transport", 14));
+        bar.add(draegerTransportCombo);
+        bar.add(makeBoldLabel("TCP Port", 14));
+        bar.add(draegerPortField);
+        bar.add(makeBoldLabel("Serial", 14));
+        bar.add(draegerSerialField);
+        bar.add(makeBoldLabel("Model", 14));
+        bar.add(modelCombo);
+        bar.add(btnDraegerStart);
+        bar.add(btnDraegerStop);
 
-        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
-        right.setBackground(bar.getBackground());
-        right.add(btnDraegerStart);
-        right.add(btnDraegerStop);
-        right.add(drOptionsBtn);
-        bar.add(right, BorderLayout.EAST);
+        draegerStatus.setForeground(Color.GRAY);
+        draegerStatus.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
+        bar.add(draegerStatus);
 
-        draegerStatus.setOpaque(true);
-        draegerConnStatus.setOpaque(true);
-        draegerTransportChip.setOpaque(true);
-        draegerProfileChip.setOpaque(true);
+        draegerConnStatus.setForeground(new Color(100, 100, 100));
+        draegerConnStatus.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 13));
+        bar.add(draegerConnStatus);
+
+        bar.add(Box.createHorizontalStrut(10));
+        bar.add(makeBoldLabel("Speed:", 14));
+        bar.add(drSweepSpeed);
+        bar.add(drFreezeBtn);
+
+        JButton ssBtn = makeDarkButton("\uD83D\uDCF8 Screenshot");
+        ssBtn.addActionListener(e -> takeScreenshot());
+        bar.add(ssBtn);
+
         return bar;
     }
 
@@ -1107,11 +1107,6 @@ public class CriticalInsightsMonitor extends JFrame {
         JPanel outer = new JPanel(new BorderLayout(0, 4));
         outer.setBackground(PANEL_BG);
 
-        outer.add(buildDraegerConnectionSetup(), BorderLayout.NORTH);
-
-        JPanel body = new JPanel(new BorderLayout(0, 4));
-        body.setBackground(PANEL_BG);
-
         JPanel titleRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         titleRow.setBackground(PANEL_BG);
         JLabel title = new JLabel("Vital Controls");
@@ -1154,14 +1149,13 @@ public class CriticalInsightsMonitor extends JFrame {
         advancedRow.setVisible(drAdvancedToggle.isSelected());
         drAdvancedToggle.addActionListener(e -> advancedRow.setVisible(drAdvancedToggle.isSelected()));
 
-        body.add(titleRow, BorderLayout.NORTH);
-        body.add(sliders, BorderLayout.CENTER);
+        outer.add(titleRow, BorderLayout.NORTH);
+        outer.add(sliders, BorderLayout.CENTER);
         JPanel south = new JPanel(new BorderLayout(0, 4));
         south.setBackground(PANEL_BG);
         south.add(bottomRow, BorderLayout.NORTH);
         south.add(advancedRow, BorderLayout.SOUTH);
-        body.add(south, BorderLayout.SOUTH);
-        outer.add(body, BorderLayout.CENTER);
+        outer.add(south, BorderLayout.SOUTH);
         return outer;
     }
 
@@ -1209,24 +1203,6 @@ public class CriticalInsightsMonitor extends JFrame {
         return outer;
     }
 
-    private JPanel buildDraegerConnectionSetup() {
-        JPanel section = buildSectionPanel("Connection");
-        JPanel grid = new JPanel(new GridLayout(2, 4, 10, 8));
-        grid.setBackground(PANEL_BG);
-
-        grid.add(buildFieldCell("Transport", draegerTransportCombo));
-        grid.add(buildFieldCell("TCP Port", draegerPortField));
-        grid.add(buildFieldCell("Serial", draegerSerialField));
-        grid.add(buildFieldCell("Model", modelCombo));
-        grid.add(buildFieldCell("Sweep", drSweepSpeed));
-        grid.add(buildFieldCell("Start", btnDraegerStart));
-        grid.add(buildFieldCell("Stop", btnDraegerStop));
-        grid.add(buildFieldCell("Options", drOptionsBtn));
-
-        section.add(grid, BorderLayout.CENTER);
-        return section;
-    }
-
     // =====================================================================
     // Philips Tab
     // =====================================================================
@@ -1237,7 +1213,7 @@ public class CriticalInsightsMonitor extends JFrame {
 
         JPanel northPanel = new JPanel(new BorderLayout(0, 0));
         northPanel.setBackground(DARK_BG);
-        northPanel.add(buildPhilipsHeaderBar(), BorderLayout.NORTH);
+        northPanel.add(buildPhilipsConnectionBar(), BorderLayout.NORTH);
         northPanel.add(buildAlarmBar(phAlarmBar, phMuteBtn), BorderLayout.SOUTH);
         tab.add(northPanel, BorderLayout.NORTH);
 
@@ -1268,36 +1244,39 @@ public class CriticalInsightsMonitor extends JFrame {
         return tab;
     }
 
-    private JPanel buildPhilipsHeaderBar() {
-        JPanel bar = new JPanel(new BorderLayout(12, 0));
-        bar.setBackground(new Color(24, 24, 24));
-        bar.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(55, 55, 55)),
-                BorderFactory.createEmptyBorder(8, 10, 8, 10)));
+    private JPanel buildPhilipsConnectionBar() {
+        JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 6));
+        bar.setBackground(new Color(30, 30, 30));
+        bar.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(60, 60, 60)));
 
-        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
-        left.setBackground(bar.getBackground());
-        JLabel title = new JLabel("Philips");
-        title.setForeground(Color.WHITE);
-        title.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 16));
-        left.add(title);
-        left.add(buildChip("State", philipsStatus, new Color(50, 80, 50)));
-        left.add(buildChip("Conn", philipsConnStatus, new Color(60, 60, 60)));
-        left.add(buildChip("Transport", philipsTransportChip, new Color(45, 60, 80)));
-        left.add(buildChip("Profile", philipsProfileChip, new Color(45, 45, 75)));
-        bar.add(left, BorderLayout.WEST);
+        bar.add(makeBoldLabel("Connection:", 14));
+        bar.add(makeBoldLabel("Transport", 14));
+        bar.add(philipsTransportCombo);
+        bar.add(makeBoldLabel("UDP Port", 14));
+        bar.add(philipsPortField);
+        bar.add(makeBoldLabel("Serial", 14));
+        bar.add(philipsSerialField);
+        bar.add(chkBroadcast);
+        bar.add(btnPhilipsStart);
+        bar.add(btnPhilipsStop);
 
-        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
-        right.setBackground(bar.getBackground());
-        right.add(btnPhilipsStart);
-        right.add(btnPhilipsStop);
-        right.add(phOptionsBtn);
-        bar.add(right, BorderLayout.EAST);
+        philipsStatus.setForeground(Color.GRAY);
+        philipsStatus.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
+        bar.add(philipsStatus);
 
-        philipsStatus.setOpaque(true);
-        philipsConnStatus.setOpaque(true);
-        philipsTransportChip.setOpaque(true);
-        philipsProfileChip.setOpaque(true);
+        philipsConnStatus.setForeground(new Color(100, 100, 100));
+        philipsConnStatus.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 13));
+        bar.add(philipsConnStatus);
+
+        bar.add(Box.createHorizontalStrut(10));
+        bar.add(makeBoldLabel("Speed:", 14));
+        bar.add(phSweepSpeed);
+        bar.add(phFreezeBtn);
+
+        JButton ssBtn = makeDarkButton("\uD83D\uDCF8 Screenshot");
+        ssBtn.addActionListener(e -> takeScreenshot());
+        bar.add(ssBtn);
+
         return bar;
     }
 
@@ -1376,11 +1355,6 @@ public class CriticalInsightsMonitor extends JFrame {
         JPanel outer = new JPanel(new BorderLayout(0, 4));
         outer.setBackground(PANEL_BG);
 
-        outer.add(buildPhilipsConnectionSetup(), BorderLayout.NORTH);
-
-        JPanel body = new JPanel(new BorderLayout(0, 4));
-        body.setBackground(PANEL_BG);
-
         JPanel titleRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         titleRow.setBackground(PANEL_BG);
         JLabel title = new JLabel("Vital Controls");
@@ -1442,14 +1416,13 @@ public class CriticalInsightsMonitor extends JFrame {
         advancedRow.setVisible(phAdvancedToggle.isSelected());
         phAdvancedToggle.addActionListener(e -> advancedRow.setVisible(phAdvancedToggle.isSelected()));
 
-        body.add(titleRow, BorderLayout.NORTH);
-        body.add(sliders, BorderLayout.CENTER);
+        outer.add(titleRow, BorderLayout.NORTH);
+        outer.add(sliders, BorderLayout.CENTER);
         JPanel south = new JPanel(new BorderLayout(0, 4));
         south.setBackground(PANEL_BG);
         south.add(bottomRow, BorderLayout.NORTH);
         south.add(advancedRow, BorderLayout.SOUTH);
-        body.add(south, BorderLayout.SOUTH);
-        outer.add(body, BorderLayout.CENTER);
+        outer.add(south, BorderLayout.SOUTH);
         return outer;
     }
 
@@ -1493,24 +1466,6 @@ public class CriticalInsightsMonitor extends JFrame {
         return outer;
     }
 
-    private JPanel buildPhilipsConnectionSetup() {
-        JPanel section = buildSectionPanel("Connection");
-        JPanel grid = new JPanel(new GridLayout(2, 4, 10, 8));
-        grid.setBackground(PANEL_BG);
-
-        grid.add(buildFieldCell("Transport", philipsTransportCombo));
-        grid.add(buildFieldCell("UDP Port", philipsPortField));
-        grid.add(buildFieldCell("Serial", philipsSerialField));
-        grid.add(buildFieldCell("Broadcast", chkBroadcast));
-        grid.add(buildFieldCell("Sweep", phSweepSpeed));
-        grid.add(buildFieldCell("Start", btnPhilipsStart));
-        grid.add(buildFieldCell("Stop", btnPhilipsStop));
-        grid.add(buildFieldCell("Options", phOptionsBtn));
-
-        section.add(grid, BorderLayout.CENTER);
-        return section;
-    }
-
     private JPanel buildLiveSurfaceHeader(String title, JButton optionsButton) {
         JPanel header = new JPanel(new BorderLayout(0, 0));
         header.setBackground(PANEL_BG);
@@ -1533,30 +1488,6 @@ public class CriticalInsightsMonitor extends JFrame {
         east.add(optionsButton);
         header.add(east, BorderLayout.EAST);
         return header;
-    }
-
-    private JPanel buildSectionPanel(String titleText) {
-        JPanel section = new JPanel(new BorderLayout(0, 6));
-        section.setBackground(PANEL_BG);
-        section.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(60, 60, 60)),
-                BorderFactory.createEmptyBorder(6, 0, 8, 0)));
-        JLabel title = new JLabel(titleText);
-        title.setForeground(new Color(200, 200, 200));
-        title.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
-        section.add(title, BorderLayout.NORTH);
-        return section;
-    }
-
-    private JPanel buildFieldCell(String label, Component control) {
-        JPanel cell = new JPanel(new BorderLayout(0, 4));
-        cell.setBackground(PANEL_BG);
-        JLabel title = new JLabel(label);
-        title.setForeground(new Color(150, 150, 150));
-        title.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 11));
-        cell.add(title, BorderLayout.NORTH);
-        cell.add(control, BorderLayout.CENTER);
-        return cell;
     }
 
     private void configureOptionsPopup(JButton button, JPopupMenu menu, JComboBox<String> viewCombo, JCheckBox advancedToggle, JButton freezeButton) {
@@ -1844,6 +1775,7 @@ public class CriticalInsightsMonitor extends JFrame {
 
         bar.add(makeBoldLabel(deviceName + " view:", 14));
         bar.add(viewCombo);
+        bar.add(makeBoldLabel("Monitor = quick status, Setup = controls, Review = read-only snapshot", 11));
         return bar;
     }
 
@@ -1872,82 +1804,6 @@ public class CriticalInsightsMonitor extends JFrame {
         tile.add(key, BorderLayout.NORTH);
         tile.add(valueLabel, BorderLayout.CENTER);
         return tile;
-    }
-
-    private JPanel buildChip(String label, JLabel valueLabel, Color bg) {
-        JPanel chip = new JPanel(new BorderLayout(4, 0));
-        chip.setBackground(bg);
-        chip.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(bg.brighter(), 1),
-                BorderFactory.createEmptyBorder(2, 8, 2, 8)));
-
-        JLabel key = new JLabel(label.toUpperCase(Locale.ROOT));
-        key.setForeground(new Color(160, 160, 160));
-        key.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 10));
-
-        valueLabel.setForeground(Color.WHITE);
-        valueLabel.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
-
-        chip.add(key, BorderLayout.NORTH);
-        chip.add(valueLabel, BorderLayout.CENTER);
-        return chip;
-    }
-
-    private void styleStateChip(JLabel label, DeviceUiState state) {
-        Color bg;
-        Color fg = Color.WHITE;
-        switch (state) {
-            case CONNECTED:
-                bg = new Color(40, 90, 55);
-                break;
-            case STARTING:
-                bg = new Color(120, 90, 35);
-                break;
-            case RECONNECTING:
-                bg = new Color(130, 85, 35);
-                break;
-            case FAULT:
-                bg = new Color(130, 45, 45);
-                break;
-            case STOPPED:
-            default:
-                bg = new Color(70, 70, 70);
-                fg = new Color(230, 230, 230);
-                break;
-        }
-        label.setOpaque(true);
-        label.setBackground(bg);
-        label.setForeground(fg);
-        label.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(bg.brighter(), 1),
-                BorderFactory.createEmptyBorder(2, 8, 2, 8)));
-    }
-
-    private void styleConnectionChip(JLabel label) {
-        label.setOpaque(true);
-        label.setBackground(new Color(55, 55, 55));
-        label.setForeground(new Color(235, 235, 235));
-        label.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(new Color(80, 80, 80), 1),
-                BorderFactory.createEmptyBorder(2, 8, 2, 8)));
-    }
-
-    private void styleTransportChip(JLabel label) {
-        label.setOpaque(true);
-        label.setBackground(new Color(45, 60, 80));
-        label.setForeground(Color.WHITE);
-        label.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(new Color(70, 90, 120), 1),
-                BorderFactory.createEmptyBorder(2, 8, 2, 8)));
-    }
-
-    private void styleProfileChip(JLabel label) {
-        label.setOpaque(true);
-        label.setBackground(new Color(45, 45, 75));
-        label.setForeground(Color.WHITE);
-        label.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(new Color(70, 70, 105), 1),
-                BorderFactory.createEmptyBorder(2, 8, 2, 8)));
     }
 
     private String valueOrDash(String value) {
@@ -2464,8 +2320,6 @@ public class CriticalInsightsMonitor extends JFrame {
         drMonitorModeValue.setText(valueOrDash((String) ventModeCombo.getSelectedItem()));
         drMonitorWaveValue.setText(chkDrWaveforms.isSelected() ? "On" : "Off");
         drMonitorNoiseValue.setText(chkNoise.isSelected() ? "On" : "Off");
-        draegerTransportChip.setText(valueOrDash((String) draegerTransportCombo.getSelectedItem()));
-        draegerProfileChip.setText(valueOrDash((String) drScenarioCombo.getSelectedItem()) + " / " + valueOrDash((String) ventModeCombo.getSelectedItem()));
         drMonitorArea.setText(buildDraegerMonitorText());
         drReviewArea.setText(buildDraegerReviewText());
 
@@ -2473,8 +2327,6 @@ public class CriticalInsightsMonitor extends JFrame {
         phMonitorRhythmValue.setText(valueOrDash((String) ecgRhythmCombo.getSelectedItem()));
         phMonitorWaveValue.setText(chkPhWaveforms.isSelected() ? "On" : "Off");
         phMonitorNbpValue.setText(chkNbpCycle.isSelected() ? "On" : "Off");
-        philipsTransportChip.setText(valueOrDash((String) philipsTransportCombo.getSelectedItem()));
-        philipsProfileChip.setText(valueOrDash((String) phScenarioCombo.getSelectedItem()) + " / " + valueOrDash((String) ecgRhythmCombo.getSelectedItem()));
         phMonitorArea.setText(buildPhilipsMonitorText());
         phReviewArea.setText(buildPhilipsReviewText());
     }
@@ -2485,14 +2337,6 @@ public class CriticalInsightsMonitor extends JFrame {
         String text = "Draeger " + drState + ": " + draegerUiMessage + " | Philips " + phState + ": " + philipsUiMessage;
         messageBar.setText(" " + text);
         messageBar.setForeground(messageColor());
-        styleStateChip(draegerStatus, draegerUiState);
-        styleStateChip(philipsStatus, philipsUiState);
-        styleConnectionChip(draegerConnStatus);
-        styleConnectionChip(philipsConnStatus);
-        styleTransportChip(draegerTransportChip);
-        styleTransportChip(philipsTransportChip);
-        styleProfileChip(draegerProfileChip);
-        styleProfileChip(philipsProfileChip);
     }
 
     private Color messageColor() {
