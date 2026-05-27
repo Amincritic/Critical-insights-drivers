@@ -469,6 +469,8 @@ public class CriticalInsightsMonitor extends JFrame {
 
     // Tabs reference
     private JTabbedPane mainTabs;
+    private JTabbedPane liveDeviceTabs;
+    private JTabbedPane controlDeviceTabs;
 
     // Screenshot toast
     private final JLabel screenshotToast = new JLabel("");
@@ -494,9 +496,7 @@ public class CriticalInsightsMonitor extends JFrame {
         mainTabs.setForeground(Color.WHITE);
         mainTabs.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 16));
 
-        mainTabs.addTab("Draeger Ventilator", buildDraegerTab());
-        mainTabs.addTab("Philips Monitor", buildPhilipsTab());
-        mainTabs.addTab("Protocol Log", buildLogTab());
+        mainTabs.addTab("Console", buildConsoleWorkspace());
 
         messageBar.setBackground(new Color(28, 28, 28));
         messageBar.setForeground(new Color(0, 220, 170));
@@ -639,12 +639,6 @@ public class CriticalInsightsMonitor extends JFrame {
                     return true;
                 } else if (e.getKeyCode() == KeyEvent.VK_1 && !e.isControlDown()) {
                     mainTabs.setSelectedIndex(0);
-                    return true;
-                } else if (e.getKeyCode() == KeyEvent.VK_2 && !e.isControlDown()) {
-                    mainTabs.setSelectedIndex(1);
-                    return true;
-                } else if (e.getKeyCode() == KeyEvent.VK_3 && !e.isControlDown()) {
-                    mainTabs.setSelectedIndex(2);
                     return true;
                 } else if (e.getKeyCode() == KeyEvent.VK_S && e.isControlDown()) {
                     takeScreenshot();
@@ -949,6 +943,165 @@ public class CriticalInsightsMonitor extends JFrame {
     // Draeger Tab
     // =====================================================================
 
+    private JPanel buildConsoleWorkspace() {
+        JPanel console = new JPanel(new BorderLayout(0, 0));
+        console.setBackground(DARK_BG);
+        console.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+        JPanel leftRail = new WidthTrackingPanel(new BorderLayout(0, 8));
+        leftRail.setBackground(DARK_BG);
+        leftRail.add(buildConsoleHeader(), BorderLayout.NORTH);
+
+        JScrollPane leftScroll = new JScrollPane(leftRail,
+                JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
+                JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        leftScroll.setBorder(BorderFactory.createEmptyBorder());
+        leftScroll.getViewport().setBackground(DARK_BG);
+        leftScroll.getVerticalScrollBar().setUnitIncrement(18);
+        leftScroll.setMinimumSize(new Dimension(360, 0));
+        leftScroll.setPreferredSize(new Dimension(500, 0));
+
+        liveDeviceTabs = new JTabbedPane();
+        liveDeviceTabs.setBackground(DARK_BG);
+        liveDeviceTabs.setForeground(Color.WHITE);
+        liveDeviceTabs.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
+        liveDeviceTabs.addTab("Draeger", buildDraegerLiveConsole());
+        liveDeviceTabs.addTab("Philips", buildPhilipsLiveConsole());
+
+        controlDeviceTabs = new JTabbedPane();
+        controlDeviceTabs.setBackground(DARK_BG);
+        controlDeviceTabs.setForeground(Color.WHITE);
+        controlDeviceTabs.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
+        controlDeviceTabs.addTab("Draeger", buildDeviceSessionPanel("Draeger", buildDraegerConnectionBar(), buildDraegerControlsArea()));
+        controlDeviceTabs.addTab("Philips", buildDeviceSessionPanel("Philips", buildPhilipsConnectionBar(), buildPhilipsControlsArea()));
+        controlDeviceTabs.addChangeListener(e -> {
+            int selected = controlDeviceTabs.getSelectedIndex();
+            if (selected >= 0 && liveDeviceTabs.getSelectedIndex() != selected) {
+                liveDeviceTabs.setSelectedIndex(selected);
+            }
+        });
+        liveDeviceTabs.addChangeListener(e -> {
+            int selected = liveDeviceTabs.getSelectedIndex();
+            if (selected >= 0 && controlDeviceTabs.getSelectedIndex() != selected) {
+                controlDeviceTabs.setSelectedIndex(selected);
+            }
+        });
+        leftRail.add(controlDeviceTabs, BorderLayout.CENTER);
+
+        JPanel logPanel = buildConsoleLogPanel();
+        logPanel.setPreferredSize(new Dimension(360, 0));
+
+        JSplitPane centerRight = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, liveDeviceTabs, logPanel);
+        centerRight.setResizeWeight(0.74);
+        centerRight.setDividerLocation(760);
+        centerRight.setDividerSize(6);
+        centerRight.setContinuousLayout(true);
+        centerRight.setBorder(BorderFactory.createEmptyBorder());
+        centerRight.setBackground(DARK_BG);
+        centerRight.setMinimumSize(new Dimension(640, 0));
+
+        JSplitPane fullWorkspace = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftScroll, centerRight);
+        fullWorkspace.setResizeWeight(0.30);
+        fullWorkspace.setDividerLocation(500);
+        fullWorkspace.setDividerSize(6);
+        fullWorkspace.setContinuousLayout(true);
+        fullWorkspace.setBorder(BorderFactory.createEmptyBorder());
+        fullWorkspace.setBackground(DARK_BG);
+
+        console.add(fullWorkspace, BorderLayout.CENTER);
+        return console;
+    }
+
+    private JPanel buildConsoleHeader() {
+        JPanel panel = new JPanel(new BorderLayout(0, 2));
+        panel.setBackground(PANEL_BG);
+        panel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 58));
+        panel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 1, 1, 1, new Color(50, 58, 64)),
+                BorderFactory.createEmptyBorder(8, 10, 8, 10)));
+
+        JLabel title = new JLabel("Clinical Engineering Console");
+        title.setForeground(Color.WHITE);
+        title.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 16));
+        JLabel subtitle = new JLabel("Simulator control, live preview, and protocol evidence");
+        subtitle.setForeground(new Color(150, 160, 168));
+        subtitle.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
+        panel.add(title, BorderLayout.NORTH);
+        panel.add(subtitle, BorderLayout.SOUTH);
+        return panel;
+    }
+
+    private JPanel buildDeviceSessionPanel(String title, JPanel connectionBar, JPanel controlsArea) {
+        JPanel panel = new JPanel(new BorderLayout(0, 8));
+        panel.setBackground(PANEL_BG);
+        panel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        panel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 1, 1, 1, new Color(48, 54, 60)),
+                BorderFactory.createEmptyBorder(8, 8, 8, 8)));
+
+        JLabel label = new JLabel(title);
+        label.setForeground(new Color(230, 234, 238));
+        label.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 14));
+        panel.add(label, BorderLayout.NORTH);
+
+        JPanel body = new JPanel(new BorderLayout(0, 8));
+        body.setBackground(PANEL_BG);
+        body.add(connectionBar, BorderLayout.NORTH);
+        body.add(controlsArea, BorderLayout.CENTER);
+        panel.add(body, BorderLayout.CENTER);
+        return panel;
+    }
+
+    private JPanel buildDraegerLiveConsole() {
+        JPanel tab = new JPanel(new BorderLayout(0, 8));
+        tab.setBackground(DARK_BG);
+        tab.add(buildAlarmBar(drAlarmBar, drMuteBtn), BorderLayout.NORTH);
+
+        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, drWavePanel, buildVitalsScrollPane(buildDraegerNumericsPanel()));
+        split.setBackground(DARK_BG);
+        split.setResizeWeight(0.78);
+        split.setDividerLocation(700);
+        split.setDividerSize(6);
+        split.setContinuousLayout(true);
+        split.setBorder(BorderFactory.createEmptyBorder());
+
+        JPanel surface = new JPanel(new BorderLayout(0, 4));
+        surface.setBackground(DARK_BG);
+        surface.add(buildLiveSurfaceHeader("Draeger Live Preview", drOptionsBtn), BorderLayout.NORTH);
+        surface.add(split, BorderLayout.CENTER);
+        tab.add(surface, BorderLayout.CENTER);
+        return tab;
+    }
+
+    private JPanel buildPhilipsLiveConsole() {
+        JPanel tab = new JPanel(new BorderLayout(0, 8));
+        tab.setBackground(DARK_BG);
+        tab.add(buildAlarmBar(phAlarmBar, phMuteBtn), BorderLayout.NORTH);
+
+        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, phWavePanel, buildVitalsScrollPane(buildPhilipsNumericsPanel()));
+        split.setBackground(DARK_BG);
+        split.setResizeWeight(0.76);
+        split.setDividerLocation(700);
+        split.setDividerSize(6);
+        split.setContinuousLayout(true);
+        split.setBorder(BorderFactory.createEmptyBorder());
+
+        JPanel surface = new JPanel(new BorderLayout(0, 4));
+        surface.setBackground(DARK_BG);
+        surface.add(buildLiveSurfaceHeader("Philips Live Preview", phOptionsBtn), BorderLayout.NORTH);
+        surface.add(split, BorderLayout.CENTER);
+        tab.add(surface, BorderLayout.CENTER);
+        return tab;
+    }
+
+    private JPanel buildConsoleLogPanel() {
+        JPanel panel = buildLogTab();
+        panel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 1, 1, 1, new Color(48, 54, 60)),
+                BorderFactory.createEmptyBorder(0, 0, 0, 0)));
+        return panel;
+    }
+
     private JPanel buildDraegerTab() {
         JPanel tab = new JPanel(new BorderLayout(0, 0));
         tab.setBackground(DARK_BG);
@@ -1007,39 +1160,42 @@ public class CriticalInsightsMonitor extends JFrame {
     }
 
     private JPanel buildDraegerConnectionBar() {
-        JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 6));
-        bar.setBackground(new Color(30, 30, 30));
-        bar.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(60, 60, 60)));
+        JPanel bar = new JPanel(new BorderLayout(0, 8));
+        bar.setBackground(PANEL_BG);
+        bar.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(50, 56, 62)));
 
-        bar.add(makeBoldLabel("Connection:", 14));
-        bar.add(makeBoldLabel("Transport", 14));
-        bar.add(draegerTransportCombo);
-        bar.add(makeBoldLabel("TCP Port", 14));
-        bar.add(draegerPortField);
-        bar.add(makeBoldLabel("Serial", 14));
-        bar.add(draegerSerialField);
-        bar.add(makeBoldLabel("Model", 14));
-        bar.add(modelCombo);
-        bar.add(btnDraegerStart);
-        bar.add(btnDraegerStop);
-
+        JPanel stateRow = new JPanel(new BorderLayout(8, 0));
+        stateRow.setBackground(PANEL_BG);
         draegerStatus.setForeground(Color.GRAY);
-        draegerStatus.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
-        bar.add(draegerStatus);
-
+        draegerStatus.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 15));
         draegerConnStatus.setForeground(new Color(100, 100, 100));
-        draegerConnStatus.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 13));
-        bar.add(draegerConnStatus);
+        draegerConnStatus.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
+        stateRow.add(draegerStatus, BorderLayout.WEST);
+        stateRow.add(draegerConnStatus, BorderLayout.CENTER);
 
-        bar.add(Box.createHorizontalStrut(10));
-        bar.add(makeBoldLabel("Speed:", 14));
-        bar.add(drSweepSpeed);
-        bar.add(drFreezeBtn);
+        JPanel fields = new JPanel(new GridBagLayout());
+        fields.setBackground(PANEL_BG);
+        GridBagConstraints gbc = compactGbc();
+        addCompactField(fields, gbc, 0, "Transport", draegerTransportCombo);
+        addCompactField(fields, gbc, 1, "TCP Port", draegerPortField);
+        addCompactField(fields, gbc, 2, "Serial", draegerSerialField);
+        addCompactField(fields, gbc, 3, "Model", modelCombo);
 
-        JButton ssBtn = makeDarkButton("\uD83D\uDCF8 Screenshot");
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        actions.setBackground(PANEL_BG);
+        actions.add(btnDraegerStart);
+        actions.add(btnDraegerStop);
+        actions.add(makeTinyLabel("Speed"));
+        actions.add(drSweepSpeed);
+        actions.add(drFreezeBtn);
+
+        JButton ssBtn = makeDarkButton("Screenshot");
         ssBtn.addActionListener(e -> takeScreenshot());
-        bar.add(ssBtn);
+        actions.add(ssBtn);
 
+        bar.add(stateRow, BorderLayout.NORTH);
+        bar.add(fields, BorderLayout.CENTER);
+        bar.add(actions, BorderLayout.SOUTH);
         return bar;
     }
 
@@ -1084,13 +1240,20 @@ public class CriticalInsightsMonitor extends JFrame {
 
         outer.add(buildDeviceViewBar("Draeger", drViewCombo), BorderLayout.NORTH);
 
-        JPanel cards = new JPanel(new CardLayout());
+        JPanel cards = new WidthTrackingPanel(new CardLayout());
         cards.setBackground(PANEL_BG);
         cards.add(buildDraegerMonitorPanel(), "Monitor");
         cards.add(buildDraegerSetupPanel(), "Setup");
         cards.add(buildDraegerReviewPanel(), "Review");
         drViewCombo.addActionListener(e -> showCard(cards, drViewCombo));
-        outer.add(cards, BorderLayout.CENTER);
+        JScrollPane cardScroll = new JScrollPane(cards,
+                JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
+                JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        cardScroll.setBorder(BorderFactory.createEmptyBorder());
+        cardScroll.getViewport().setBackground(PANEL_BG);
+        cardScroll.getVerticalScrollBar().setUnitIncrement(16);
+        cardScroll.setPreferredSize(new Dimension(0, 360));
+        outer.add(cardScroll, BorderLayout.CENTER);
         showCard(cards, drViewCombo);
         return outer;
     }
@@ -1099,20 +1262,28 @@ public class CriticalInsightsMonitor extends JFrame {
         JPanel outer = new JPanel(new BorderLayout(0, 4));
         outer.setBackground(PANEL_BG);
 
-        JPanel titleRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        JPanel titleRow = new JPanel(new GridBagLayout());
         titleRow.setBackground(PANEL_BG);
         JLabel title = new JLabel("Vital Controls");
         title.setForeground(Color.LIGHT_GRAY);
         title.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 15));
-        titleRow.add(title);
-        titleRow.add(Box.createHorizontalStrut(20));
-        titleRow.add(makeBoldLabel("Scenario:", 14));
-        titleRow.add(drScenarioCombo);
-        titleRow.add(Box.createHorizontalStrut(10));
-        titleRow.add(drAdvancedToggle);
-        titleRow.add(chkNoise);
+        GridBagConstraints titleGbc = compactGbc();
+        titleGbc.gridx = 0;
+        titleGbc.gridy = 0;
+        titleGbc.gridwidth = 2;
+        titleGbc.weightx = 1;
+        titleRow.add(title, titleGbc);
+        titleGbc.gridwidth = 1;
+        addCompactField(titleRow, titleGbc, 1, "Scenario", drScenarioCombo);
+        titleGbc.gridx = 0;
+        titleGbc.gridy = 2;
+        titleGbc.weightx = 0;
+        titleRow.add(drAdvancedToggle, titleGbc);
+        titleGbc.gridx = 1;
+        titleGbc.weightx = 1;
+        titleRow.add(chkNoise, titleGbc);
 
-        JPanel sliders = new JPanel(new GridLayout(4, 2, 16, 6));
+        JPanel sliders = new JPanel(new GridLayout(0, 1, 0, 6));
         sliders.setBackground(PANEL_BG);
         sliders.setBorder(BorderFactory.createEmptyBorder(4, 0, 4, 0));
 
@@ -1125,15 +1296,18 @@ public class CriticalInsightsMonitor extends JFrame {
         addSliderRow(sliders, "Resistance",      slResistance);
         addSliderRow(sliders, "Airway Temp",     slAirwayTemp);
 
-        JPanel bottomRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 4));
+        JPanel bottomRow = new JPanel(new GridBagLayout());
         bottomRow.setBackground(PANEL_BG);
-        bottomRow.add(makeBoldLabel("Mode:", 14));
-        bottomRow.add(ventModeCombo);
-        bottomRow.add(chkDrWaveforms);
+        GridBagConstraints bottomGbc = compactGbc();
+        addCompactField(bottomRow, bottomGbc, 0, "Mode", ventModeCombo);
+        bottomGbc.gridx = 0;
+        bottomGbc.gridy = 1;
+        bottomGbc.gridwidth = 2;
+        bottomGbc.weightx = 1;
+        bottomRow.add(chkDrWaveforms, bottomGbc);
 
-        JPanel advancedRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 4));
+        JPanel advancedRow = new JPanel(new GridLayout(0, 1, 0, 4));
         advancedRow.setBackground(PANEL_BG);
-        advancedRow.add(makeBoldLabel("Alarms:", 14));
         advancedRow.add(chkPawHigh);
         advancedRow.add(chkApnea);
         advancedRow.add(chkO2High);
@@ -1237,38 +1411,42 @@ public class CriticalInsightsMonitor extends JFrame {
     }
 
     private JPanel buildPhilipsConnectionBar() {
-        JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 6));
-        bar.setBackground(new Color(30, 30, 30));
-        bar.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(60, 60, 60)));
+        JPanel bar = new JPanel(new BorderLayout(0, 8));
+        bar.setBackground(PANEL_BG);
+        bar.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(50, 56, 62)));
 
-        bar.add(makeBoldLabel("Connection:", 14));
-        bar.add(makeBoldLabel("Transport", 14));
-        bar.add(philipsTransportCombo);
-        bar.add(makeBoldLabel("UDP Port", 14));
-        bar.add(philipsPortField);
-        bar.add(makeBoldLabel("Serial", 14));
-        bar.add(philipsSerialField);
-        bar.add(chkBroadcast);
-        bar.add(btnPhilipsStart);
-        bar.add(btnPhilipsStop);
-
+        JPanel stateRow = new JPanel(new BorderLayout(8, 0));
+        stateRow.setBackground(PANEL_BG);
         philipsStatus.setForeground(Color.GRAY);
-        philipsStatus.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
-        bar.add(philipsStatus);
-
+        philipsStatus.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 15));
         philipsConnStatus.setForeground(new Color(100, 100, 100));
-        philipsConnStatus.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 13));
-        bar.add(philipsConnStatus);
+        philipsConnStatus.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
+        stateRow.add(philipsStatus, BorderLayout.WEST);
+        stateRow.add(philipsConnStatus, BorderLayout.CENTER);
 
-        bar.add(Box.createHorizontalStrut(10));
-        bar.add(makeBoldLabel("Speed:", 14));
-        bar.add(phSweepSpeed);
-        bar.add(phFreezeBtn);
+        JPanel fields = new JPanel(new GridBagLayout());
+        fields.setBackground(PANEL_BG);
+        GridBagConstraints gbc = compactGbc();
+        addCompactField(fields, gbc, 0, "Transport", philipsTransportCombo);
+        addCompactField(fields, gbc, 1, "UDP Port", philipsPortField);
+        addCompactField(fields, gbc, 2, "Serial", philipsSerialField);
 
-        JButton ssBtn = makeDarkButton("\uD83D\uDCF8 Screenshot");
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        actions.setBackground(PANEL_BG);
+        actions.add(btnPhilipsStart);
+        actions.add(btnPhilipsStop);
+        actions.add(chkBroadcast);
+        actions.add(makeTinyLabel("Speed"));
+        actions.add(phSweepSpeed);
+        actions.add(phFreezeBtn);
+
+        JButton ssBtn = makeDarkButton("Screenshot");
         ssBtn.addActionListener(e -> takeScreenshot());
-        bar.add(ssBtn);
+        actions.add(ssBtn);
 
+        bar.add(stateRow, BorderLayout.NORTH);
+        bar.add(fields, BorderLayout.CENTER);
+        bar.add(actions, BorderLayout.SOUTH);
         return bar;
     }
 
@@ -1332,13 +1510,20 @@ public class CriticalInsightsMonitor extends JFrame {
 
         outer.add(buildDeviceViewBar("Philips", phViewCombo), BorderLayout.NORTH);
 
-        JPanel cards = new JPanel(new CardLayout());
+        JPanel cards = new WidthTrackingPanel(new CardLayout());
         cards.setBackground(PANEL_BG);
         cards.add(buildPhilipsMonitorPanel(), "Monitor");
         cards.add(buildPhilipsSetupPanel(), "Setup");
         cards.add(buildPhilipsReviewPanel(), "Review");
         phViewCombo.addActionListener(e -> showCard(cards, phViewCombo));
-        outer.add(cards, BorderLayout.CENTER);
+        JScrollPane cardScroll = new JScrollPane(cards,
+                JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
+                JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        cardScroll.setBorder(BorderFactory.createEmptyBorder());
+        cardScroll.getViewport().setBackground(PANEL_BG);
+        cardScroll.getVerticalScrollBar().setUnitIncrement(16);
+        cardScroll.setPreferredSize(new Dimension(0, 430));
+        outer.add(cardScroll, BorderLayout.CENTER);
         showCard(cards, phViewCombo);
         return outer;
     }
@@ -1347,26 +1532,35 @@ public class CriticalInsightsMonitor extends JFrame {
         JPanel outer = new JPanel(new BorderLayout(0, 4));
         outer.setBackground(PANEL_BG);
 
-        JPanel titleRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        JPanel titleRow = new JPanel(new GridBagLayout());
         titleRow.setBackground(PANEL_BG);
         JLabel title = new JLabel("Vital Controls");
         title.setForeground(Color.LIGHT_GRAY);
         title.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 15));
-        titleRow.add(title);
-        titleRow.add(Box.createHorizontalStrut(10));
-        titleRow.add(makeBoldLabel("Scenario:", 14));
-        titleRow.add(phScenarioCombo);
-        titleRow.add(Box.createHorizontalStrut(10));
-        titleRow.add(makeBoldLabel("Rhythm:", 14));
-        titleRow.add(ecgRhythmCombo);
-        titleRow.add(Box.createHorizontalStrut(10));
-        titleRow.add(phAdvancedToggle);
-        titleRow.add(chkPhNoise);
-        titleRow.add(Box.createHorizontalStrut(10));
-        titleRow.add(chkNbpCycle);
-        titleRow.add(nbpIntervalCombo);
+        GridBagConstraints titleGbc = compactGbc();
+        titleGbc.gridx = 0;
+        titleGbc.gridy = 0;
+        titleGbc.gridwidth = 2;
+        titleGbc.weightx = 1;
+        titleRow.add(title, titleGbc);
+        titleGbc.gridwidth = 1;
+        addCompactField(titleRow, titleGbc, 1, "Scenario", phScenarioCombo);
+        addCompactField(titleRow, titleGbc, 2, "Rhythm", ecgRhythmCombo);
+        titleGbc.gridx = 0;
+        titleGbc.gridy = 3;
+        titleGbc.weightx = 0;
+        titleRow.add(phAdvancedToggle, titleGbc);
+        titleGbc.gridx = 1;
+        titleGbc.weightx = 1;
+        titleRow.add(chkPhNoise, titleGbc);
+        titleGbc.gridx = 0;
+        titleGbc.gridy = 4;
+        titleRow.add(chkNbpCycle, titleGbc);
+        titleGbc.gridx = 1;
+        titleGbc.weightx = 1;
+        titleRow.add(nbpIntervalCombo, titleGbc);
 
-        JPanel sliders = new JPanel(new GridLayout(4, 3, 16, 6));
+        JPanel sliders = new JPanel(new GridLayout(0, 1, 0, 6));
         sliders.setBackground(PANEL_BG);
         sliders.setBorder(BorderFactory.createEmptyBorder(4, 0, 4, 0));
 
@@ -1387,24 +1581,24 @@ public class CriticalInsightsMonitor extends JFrame {
         bottomRow.setBackground(PANEL_BG);
         bottomRow.add(chkPhWaveforms);
 
-        JPanel advancedRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 4));
+        JPanel advancedRow = new JPanel(new GridBagLayout());
         advancedRow.setBackground(PANEL_BG);
-        advancedRow.add(makeBoldLabel("Alarms:", 14));
-        advancedRow.add(chkPhHrAlarm);
-        advancedRow.add(chkPhSpo2Low);
-        advancedRow.add(chkPhAbpHigh);
-        advancedRow.add(Box.createHorizontalStrut(20));
-        advancedRow.add(makeBoldLabel("Patient:", 14));
-        advancedRow.add(makeBoldLabel("Name", 12));
-        advancedRow.add(tfPatientName);
-        advancedRow.add(makeBoldLabel("ID", 12));
-        advancedRow.add(tfPatientId);
-        advancedRow.add(makeBoldLabel("Sex", 12));
-        advancedRow.add(cbPatientSex);
-        advancedRow.add(makeBoldLabel("Ht", 12));
-        advancedRow.add(tfPatientHeight);
-        advancedRow.add(makeBoldLabel("Wt", 12));
-        advancedRow.add(tfPatientWeight);
+        GridBagConstraints advGbc = compactGbc();
+        advGbc.gridx = 0;
+        advGbc.gridy = 0;
+        advGbc.gridwidth = 2;
+        advGbc.weightx = 1;
+        advancedRow.add(chkPhHrAlarm, advGbc);
+        advGbc.gridy = 1;
+        advancedRow.add(chkPhSpo2Low, advGbc);
+        advGbc.gridy = 2;
+        advancedRow.add(chkPhAbpHigh, advGbc);
+        advGbc.gridwidth = 1;
+        addCompactField(advancedRow, advGbc, 3, "Name", tfPatientName);
+        addCompactField(advancedRow, advGbc, 4, "ID", tfPatientId);
+        addCompactField(advancedRow, advGbc, 5, "Sex", cbPatientSex);
+        addCompactField(advancedRow, advGbc, 6, "Height", tfPatientHeight);
+        addCompactField(advancedRow, advGbc, 7, "Weight", tfPatientWeight);
         advancedRow.setVisible(phAdvancedToggle.isSelected());
         phAdvancedToggle.addActionListener(e -> advancedRow.setVisible(phAdvancedToggle.isSelected()));
 
@@ -1765,9 +1959,8 @@ public class CriticalInsightsMonitor extends JFrame {
         bar.setBackground(PANEL_BG);
         bar.setBorder(BorderFactory.createEmptyBorder(0, 0, 4, 0));
 
-        bar.add(makeBoldLabel(deviceName + " view:", 14));
+        bar.add(makeBoldLabel(deviceName + " view", 14));
         bar.add(viewCombo);
-        bar.add(makeBoldLabel("Monitor = quick status, Setup = controls, Review = read-only snapshot", 11));
         return bar;
     }
 
@@ -1864,6 +2057,62 @@ public class CriticalInsightsMonitor extends JFrame {
         l.setForeground(Color.LIGHT_GRAY);
         l.setFont(new Font(Font.SANS_SERIF, Font.BOLD, size));
         return l;
+    }
+
+    private static JLabel makeTinyLabel(String text) {
+        JLabel l = new JLabel(text);
+        l.setForeground(new Color(150, 158, 166));
+        l.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 11));
+        return l;
+    }
+
+    private static GridBagConstraints compactGbc() {
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(2, 0, 2, 8);
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.anchor = GridBagConstraints.WEST;
+        return gbc;
+    }
+
+    private static void addCompactField(JPanel panel, GridBagConstraints gbc, int row, String label, JComponent component) {
+        gbc.gridx = 0;
+        gbc.gridy = row;
+        gbc.weightx = 0;
+        panel.add(makeTinyLabel(label), gbc);
+        gbc.gridx = 1;
+        gbc.weightx = 1;
+        panel.add(component, gbc);
+    }
+
+    private static final class WidthTrackingPanel extends JPanel implements Scrollable {
+        WidthTrackingPanel(LayoutManager layout) {
+            super(layout);
+        }
+
+        @Override
+        public Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+
+        @Override
+        public int getScrollableUnitIncrement(Rectangle visibleRect, int orientation, int direction) {
+            return 16;
+        }
+
+        @Override
+        public int getScrollableBlockIncrement(Rectangle visibleRect, int orientation, int direction) {
+            return Math.max(16, visibleRect.height - 32);
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportWidth() {
+            return true;
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportHeight() {
+            return false;
+        }
     }
 
     private static JButton makeDarkButton(String text) {
@@ -2033,7 +2282,7 @@ public class CriticalInsightsMonitor extends JFrame {
     // =====================================================================
 
     private void takeScreenshot() {
-        WaveformPanel target = mainTabs.getSelectedIndex() == 0 ? drWavePanel : phWavePanel;
+        WaveformPanel target = liveDeviceTabs != null && liveDeviceTabs.getSelectedIndex() == 1 ? phWavePanel : drWavePanel;
         int w = target.getWidth();
         int h = target.getHeight();
         if (w <= 0 || h <= 0) return;
