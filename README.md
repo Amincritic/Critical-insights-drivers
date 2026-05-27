@@ -444,6 +444,8 @@ Run these after changing drivers, canonical output, simulator behavior, or web r
 
 ```bash
 ./scripts/test-canonical-replay.sh
+./scripts/smoke-simulator-gui.sh
+./scripts/test-tcp-udp-simulators.sh
 ./scripts/test-rs232-simulators.sh
 ```
 

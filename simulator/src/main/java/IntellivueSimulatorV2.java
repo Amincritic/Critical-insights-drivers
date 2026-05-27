@@ -779,11 +779,12 @@ public class IntellivueSimulatorV2 {
         int roLenPos = buf.position();
         buf.putShort((short) 0);
 
+        // Linked result header: state(u8), count(u8), invoke_id(u16).
+        buf.put((byte) 1); // First
+        buf.put((byte) 2); // two linked segments before the final RORS
+
         // Linked invoke ID
         buf.putShort((short) clientInvokeId);
-
-        // Linked result number
-        buf.putShort((short) 1); // first segment
 
         buf.putShort((short) CMD_CONFIRMED_ACTION);
         int cmdLenPos = buf.position();
@@ -846,8 +847,10 @@ public class IntellivueSimulatorV2 {
         int roLenPos = buf.position();
         buf.putShort((short) 0);
 
+        // Linked result header: state(u8), count(u8), invoke_id(u16).
+        buf.put((byte) 3); // Last
+        buf.put((byte) 2); // two linked segments before the final RORS
         buf.putShort((short) clientInvokeId);
-        buf.putShort((short) 2); // second segment
 
         buf.putShort((short) CMD_CONFIRMED_ACTION);
         int cmdLenPos = buf.position();

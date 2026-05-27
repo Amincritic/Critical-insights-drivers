@@ -15,6 +15,10 @@ import java.util.concurrent.atomic.*;
 import java.util.prefs.Preferences;
 import javax.imageio.ImageIO;
 
+import org.mdpnp.simulator.core.DeviceDescriptor;
+import org.mdpnp.simulator.core.SimulatedDevice;
+import org.mdpnp.simulator.legacy.LegacyJavaProcessDevice;
+
 /**
  * CriticalInsights Patient Monitor Simulator
  *
@@ -30,14 +34,6 @@ import javax.imageio.ImageIO;
  *   ../scripts/run-simulator-gui.sh
  */
 public class CriticalInsightsMonitor extends JFrame {
-    private enum DeviceUiState {
-        STOPPED,
-        STARTING,
-        CONNECTED,
-        RECONNECTING,
-        FAULT
-    }
-
     // =====================================================================
     // Protocol Constants -- Draeger MEDIBUS
     // =====================================================================
@@ -193,16 +189,12 @@ public class CriticalInsightsMonitor extends JFrame {
     // Shared state
     // =====================================================================
     private final Preferences prefs = Preferences.userNodeForPackage(CriticalInsightsMonitor.class);
-    private final AtomicBoolean draegerRunning = new AtomicBoolean(false);
-    private final AtomicBoolean philipsRunning = new AtomicBoolean(false);
-    private volatile DeviceUiState draegerUiState = DeviceUiState.STOPPED;
-    private volatile DeviceUiState philipsUiState = DeviceUiState.STOPPED;
-    private volatile String draegerUiMessage = "Stopped";
-    private volatile String philipsUiMessage = "Stopped";
-    private Thread draegerThread;
-    private Thread philipsThread;
-    private Process draegerSerialProcess;
-    private Process philipsSerialProcess;
+    private final GuiDeviceController draegerDevice = new GuiDeviceController("Draeger");
+    private final GuiDeviceController philipsDevice = new GuiDeviceController("Philips");
+    private SimulatedDevice draegerNetworkDevice;
+    private SimulatedDevice philipsNetworkDevice;
+    private SimulatedDevice draegerSerialDevice;
+    private SimulatedDevice philipsSerialDevice;
     private final File draegerControlFile = new File(System.getProperty("java.io.tmpdir"), "critical-insights-draeger-rs232.properties");
     private final File philipsControlFile = new File(System.getProperty("java.io.tmpdir"), "critical-insights-philips-mib-rs232.properties");
     private volatile ServerSocket draegerServerSocket;
@@ -2332,21 +2324,21 @@ public class CriticalInsightsMonitor extends JFrame {
     }
 
     private void refreshMessageBar() {
-        String drState = draegerUiState.name().toLowerCase(Locale.ROOT);
-        String phState = philipsUiState.name().toLowerCase(Locale.ROOT);
-        String text = "Draeger " + drState + ": " + draegerUiMessage + " | Philips " + phState + ": " + philipsUiMessage;
+        String drState = draegerDevice.state().name().toLowerCase(Locale.ROOT);
+        String phState = philipsDevice.state().name().toLowerCase(Locale.ROOT);
+        String text = "Draeger " + drState + ": " + draegerDevice.message() + " | Philips " + phState + ": " + philipsDevice.message();
         messageBar.setText(" " + text);
         messageBar.setForeground(messageColor());
     }
 
     private Color messageColor() {
-        if (draegerUiState == DeviceUiState.FAULT || philipsUiState == DeviceUiState.FAULT) {
+        if (draegerDevice.state() == GuiDeviceController.State.FAULT || philipsDevice.state() == GuiDeviceController.State.FAULT) {
             return new Color(255, 90, 90);
         }
-        if (draegerUiState == DeviceUiState.RECONNECTING || philipsUiState == DeviceUiState.RECONNECTING) {
+        if (draegerDevice.state() == GuiDeviceController.State.RECONNECTING || philipsDevice.state() == GuiDeviceController.State.RECONNECTING) {
             return new Color(255, 170, 80);
         }
-        if (draegerUiState == DeviceUiState.STARTING || philipsUiState == DeviceUiState.STARTING) {
+        if (draegerDevice.state() == GuiDeviceController.State.STARTING || philipsDevice.state() == GuiDeviceController.State.STARTING) {
             return new Color(220, 180, 80);
         }
         return new Color(0, 220, 170);
@@ -2799,9 +2791,8 @@ public class CriticalInsightsMonitor extends JFrame {
         });
     }
 
-    private void setDraegerUiState(DeviceUiState state, String message) {
-        draegerUiState = state;
-        draegerUiMessage = message;
+    private void setDraegerUiState(GuiDeviceController.State state, String message) {
+        draegerDevice.setState(state, message);
         SwingUtilities.invokeLater(() -> {
             draegerStatus.setText(stateLabelText(state));
             draegerStatus.setForeground(uiColorForState(state));
@@ -2810,9 +2801,8 @@ public class CriticalInsightsMonitor extends JFrame {
         setMessage("Draeger: " + message, uiColorForState(state));
     }
 
-    private void setPhilipsUiState(DeviceUiState state, String message) {
-        philipsUiState = state;
-        philipsUiMessage = message;
+    private void setPhilipsUiState(GuiDeviceController.State state, String message) {
+        philipsDevice.setState(state, message);
         SwingUtilities.invokeLater(() -> {
             philipsStatus.setText(stateLabelText(state));
             philipsStatus.setForeground(uiColorForState(state));
@@ -2821,7 +2811,7 @@ public class CriticalInsightsMonitor extends JFrame {
         setMessage("Philips: " + message, uiColorForState(state));
     }
 
-    private String stateLabelText(DeviceUiState state) {
+    private String stateLabelText(GuiDeviceController.State state) {
         switch (state) {
             case CONNECTED: return "Connected";
             case STARTING: return "Starting";
@@ -2831,7 +2821,7 @@ public class CriticalInsightsMonitor extends JFrame {
         }
     }
 
-    private Color uiColorForState(DeviceUiState state) {
+    private Color uiColorForState(GuiDeviceController.State state) {
         switch (state) {
             case CONNECTED: return new Color(0, 220, 170);
             case STARTING: return new Color(220, 180, 80);
@@ -2842,8 +2832,8 @@ public class CriticalInsightsMonitor extends JFrame {
     }
 
     private void updateDeviceUiState() {
-        boolean draegerActive = draegerUiState != DeviceUiState.STOPPED;
-        boolean philipsActive = philipsUiState != DeviceUiState.STOPPED;
+        boolean draegerActive = draegerDevice.isActive();
+        boolean philipsActive = philipsDevice.isActive();
 
         btnDraegerStart.setEnabled(!draegerActive);
         btnDraegerStop.setEnabled(draegerActive);
@@ -2955,7 +2945,7 @@ public class CriticalInsightsMonitor extends JFrame {
 
     private void updateTransportFields() {
         boolean draegerSerial = "RS232".equals(draegerTransportCombo.getSelectedItem());
-        boolean draegerActive = draegerUiState != DeviceUiState.STOPPED;
+        boolean draegerActive = draegerDevice.isActive();
         if (draegerSerial) {
             resolveSerialField(draegerSerialField);
         }
@@ -2963,7 +2953,7 @@ public class CriticalInsightsMonitor extends JFrame {
         draegerSerialField.setEnabled(!draegerActive && draegerSerial);
 
         boolean philipsSerial = "MIB-RS232".equals(philipsTransportCombo.getSelectedItem());
-        boolean philipsActive = philipsUiState != DeviceUiState.STOPPED;
+        boolean philipsActive = philipsDevice.isActive();
         if (philipsSerial) {
             resolveSerialField(philipsSerialField);
         }
@@ -2988,34 +2978,80 @@ public class CriticalInsightsMonitor extends JFrame {
     }
 
     private void writeSerialControlFiles() {
-        if (draegerRunning.get() && "RS232".equals(draegerTransportCombo.getSelectedItem())) {
+        DraegerVitalsModel draeger = draegerVitalsSnapshot();
+        if (draegerDevice.isRunning() && "RS232".equals(draegerTransportCombo.getSelectedItem())) {
             Properties p = new Properties();
-            p.setProperty("tidalVolume", String.valueOf(slTidalVol.getValue()));
-            p.setProperty("respRate", String.valueOf(slRespRate.getValue()));
-            p.setProperty("peakPressure", String.valueOf(slPeakPres.getValue()));
-            p.setProperty("peep", String.valueOf(slPeep.getValue()));
-            p.setProperty("fio2", String.valueOf(slFio2.getValue()));
-            p.setProperty("compliance", String.valueOf(slCompliance.getValue()));
-            p.setProperty("resistance", String.valueOf(slResistance.getValue()));
-            p.setProperty("airwayTemp", String.valueOf(slAirwayTemp.getValue()));
+            p.setProperty("tidalVolume", String.valueOf(draeger.tidalVolume));
+            p.setProperty("respRate", String.valueOf(draeger.respRate));
+            p.setProperty("peakPressure", String.valueOf(draeger.peakPressure));
+            p.setProperty("peep", String.valueOf(draeger.peep));
+            p.setProperty("fio2", String.valueOf(draeger.fio2));
+            p.setProperty("compliance", String.valueOf(draeger.compliance));
+            p.setProperty("resistance", String.valueOf(draeger.resistance));
+            p.setProperty("airwayTemp", String.valueOf(draeger.airwayTemp));
             storeProperties(p, draegerControlFile);
         }
-        if (philipsRunning.get() && "MIB-RS232".equals(philipsTransportCombo.getSelectedItem())) {
+        PhilipsVitalsModel philips = philipsVitalsSnapshot();
+        if (philipsDevice.isRunning() && "MIB-RS232".equals(philipsTransportCombo.getSelectedItem())) {
             Properties p = new Properties();
-            int abpSys = slAbpSys.getValue();
-            int abpDia = slAbpDia.getValue();
-            p.setProperty("heartRate", String.valueOf(slHeartRate.getValue()));
-            p.setProperty("spo2", String.valueOf(slSpo2.getValue()));
-            p.setProperty("pulseRate", String.valueOf(slHeartRate.getValue()));
-            p.setProperty("respRate", String.valueOf(slPhRespRate.getValue()));
-            p.setProperty("abpSys", String.valueOf(abpSys));
-            p.setProperty("abpDia", String.valueOf(abpDia));
-            p.setProperty("nbpSys", String.valueOf(slNbpSys.getValue()));
-            p.setProperty("nbpDia", String.valueOf(slNbpDia.getValue()));
-            p.setProperty("etCo2", String.valueOf(slEtCo2.getValue()));
-            p.setProperty("temp", String.valueOf(slTemp.getValue() / 10.0));
+            p.setProperty("heartRate", String.valueOf(philips.heartRate));
+            p.setProperty("spo2", String.valueOf(philips.spo2));
+            p.setProperty("pulseRate", String.valueOf(philips.heartRate));
+            p.setProperty("respRate", String.valueOf(philips.respRate));
+            p.setProperty("abpSys", String.valueOf(philips.abpSys));
+            p.setProperty("abpDia", String.valueOf(philips.abpDia));
+            p.setProperty("nbpSys", String.valueOf(philips.nbpSys));
+            p.setProperty("nbpDia", String.valueOf(philips.nbpDia));
+            p.setProperty("etCo2", String.valueOf(philips.etCo2));
+            p.setProperty("temp", String.valueOf(philips.tempC()));
             storeProperties(p, philipsControlFile);
         }
+    }
+
+    private DraegerVitalsModel draegerVitalsSnapshot() {
+        return new DraegerVitalsModel(
+                slTidalVol.getValue(),
+                slRespRate.getValue(),
+                slPeakPres.getValue(),
+                slPeep.getValue(),
+                slFio2.getValue(),
+                slCompliance.getValue(),
+                slResistance.getValue(),
+                slAirwayTemp.getValue(),
+                (String) modelCombo.getSelectedItem(),
+                (String) ventModeCombo.getSelectedItem(),
+                chkDrWaveforms.isSelected(),
+                chkNoise.isSelected());
+    }
+
+    private PhilipsVitalsModel philipsVitalsSnapshot() {
+        return new PhilipsVitalsModel(
+                slHeartRate.getValue(),
+                slSpo2.getValue(),
+                slPhRespRate.getValue(),
+                slAbpSys.getValue(),
+                slAbpDia.getValue(),
+                slNbpSys.getValue(),
+                slNbpDia.getValue(),
+                slEtCo2.getValue(),
+                slTemp.getValue(),
+                slCvp.getValue(),
+                slPapSys.getValue(),
+                slPapDia.getValue(),
+                (String) ecgRhythmCombo.getSelectedItem(),
+                chkPhWaveforms.isSelected(),
+                chkPhNoise.isSelected(),
+                patientSnapshot());
+    }
+
+    private PatientDemographics patientSnapshot() {
+        return new PatientDemographics(
+                tfPatientName.getText(),
+                tfPatientId.getText(),
+                tfPatientDob.getText(),
+                (String) cbPatientSex.getSelectedItem(),
+                tfPatientHeight.getText(),
+                tfPatientWeight.getText());
     }
 
     private void storeProperties(Properties p, File file) {
@@ -3026,44 +3062,21 @@ public class CriticalInsightsMonitor extends JFrame {
         }
     }
 
-    private void startProcessLogReader(String prefix, Process process) {
-        Thread t = new Thread(() -> {
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    log("[" + prefix + "] " + line);
-                }
-            } catch (IOException e) {
-                log("[" + prefix + "] log reader stopped: " + e.getMessage());
-            }
-        }, prefix.toLowerCase(Locale.ROOT).replace(' ', '-') + "-log");
-        t.setDaemon(true);
-        t.start();
+    private DeviceDescriptor serialDescriptor(String id, String type, String vendor, String model, String transportType, String port) {
+        Map<String, String> transport = new LinkedHashMap<String, String>();
+        transport.put("type", transportType);
+        transport.put("port", port);
+        return new DeviceDescriptor(id, type, vendor, model, transport);
     }
 
-    private void stopProcess(Process process) {
-        if (process == null) return;
-        process.destroy();
-        try {
-            if (!process.waitFor(1500, TimeUnit.MILLISECONDS)) {
-                process.destroyForcibly();
-                process.waitFor(1500, TimeUnit.MILLISECONDS);
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+    private Map<String, String> serialSettings(File controlFile) {
+        Map<String, String> settings = new LinkedHashMap<String, String>();
+        settings.put("control-file", controlFile.getAbsolutePath());
+        return settings;
     }
 
-    private String javaCommand() {
-        String javaHome = System.getenv("JAVA_HOME");
-        if (javaHome != null && !javaHome.trim().isEmpty()) {
-            return javaHome + File.separator + "bin" + File.separator + "java";
-        }
-        return "java";
-    }
-
-    private String simulatorClasspath() {
-        return System.getProperty("java.class.path", ".");
+    private DeviceDescriptor networkDescriptor(String id, String type, String vendor, String model, String transportType, String port) {
+        return serialDescriptor(id, type, vendor, model, transportType, port);
     }
 
     // =====================================================================
@@ -3071,7 +3084,7 @@ public class CriticalInsightsMonitor extends JFrame {
     // =====================================================================
 
     private void startDraeger() {
-        if (draegerRunning.get()) return;
+        if (draegerDevice.isRunning()) return;
         String transport = (String) draegerTransportCombo.getSelectedItem();
         if ("RS232".equals(transport)) {
             startDraegerSerial();
@@ -3085,15 +3098,22 @@ public class CriticalInsightsMonitor extends JFrame {
             return;
         }
 
-        draegerRunning.set(true);
-        setDraegerUiState(DeviceUiState.STARTING, "Listening on port " + port);
+        String statusMessage = "Listening on port " + port;
+        if (!draegerDevice.beginStarting(statusMessage)) return;
+        setDraegerUiState(GuiDeviceController.State.STARTING, statusMessage);
 
         String model = (String) modelCombo.getSelectedItem();
         log("[Draeger] Starting on TCP port " + port + " model=" + model);
 
-        draegerThread = new Thread(() -> runDraegerServer(port), "draeger-sim-ci");
-        draegerThread.setDaemon(true);
-        draegerThread.start();
+        DeviceDescriptor descriptor = networkDescriptor("draeger_gui_tcp", "draeger-medibus", "Draeger", model, "tcp", String.valueOf(port));
+        draegerNetworkDevice = new InProcessSimulatedDevice(descriptor, () -> runDraegerServer(port), this::closeDraegerNetworkResources);
+        try {
+            draegerNetworkDevice.start();
+        } catch (Exception e) {
+            draegerDevice.requestStop();
+            setDraegerUiState(GuiDeviceController.State.FAULT, "Start failed: " + e.getMessage());
+            JOptionPane.showMessageDialog(this, "Could not start Draeger TCP simulator: " + e.getMessage());
+        }
     }
 
     private void startDraegerSerial() {
@@ -3103,40 +3123,42 @@ public class CriticalInsightsMonitor extends JFrame {
             return;
         }
         String model = (String) modelCombo.getSelectedItem();
-        draegerRunning.set(true);
+        if (!draegerDevice.beginStarting("Starting serial process")) return;
         try {
             writeSerialControlFiles();
-            ProcessBuilder pb = new ProcessBuilder(
-                    javaCommand(), "-cp", simulatorClasspath(), "MedibusSimulatorV2",
-                    "--serial", serialPath,
-                    "--model", model,
-                    "--control-file", draegerControlFile.getAbsolutePath());
-            pb.redirectErrorStream(true);
-            draegerSerialProcess = pb.start();
-            startProcessLogReader("Draeger RS232", draegerSerialProcess);
-        } catch (IOException e) {
-            draegerRunning.set(false);
-            setDraegerUiState(DeviceUiState.FAULT, "Start failed: " + e.getMessage());
+            Map<String, String> settings = serialSettings(draegerControlFile);
+            settings.put("model", model);
+            DeviceDescriptor descriptor = serialDescriptor("draeger_gui_rs232", "draeger-medibus", "Draeger", model, "serial", serialPath);
+            draegerSerialDevice = LegacyJavaProcessDevice.draeger(
+                    descriptor,
+                    settings,
+                    new File("."),
+                    line -> log("[Draeger RS232] " + line));
+            draegerSerialDevice.start();
+        } catch (Exception e) {
+            draegerDevice.requestStop();
+            setDraegerUiState(GuiDeviceController.State.FAULT, "Start failed: " + e.getMessage());
             JOptionPane.showMessageDialog(this, "Could not start Draeger RS232 simulator: " + e.getMessage());
             return;
         }
 
-        setDraegerUiState(DeviceUiState.STARTING, "Serial process started");
+        setDraegerUiState(GuiDeviceController.State.STARTING, "Serial process started");
         draegerConnStatus.setText("Serial: " + serialPath);
         log("[Draeger] Starting RS232 simulator on " + serialPath + " model=" + model);
     }
 
     private void stopDraeger() {
-        draegerRunning.set(false);
-        stopProcess(draegerSerialProcess);
-        draegerSerialProcess = null;
-        try {
-            if (draegerServerSocket != null && !draegerServerSocket.isClosed()) {
-                draegerServerSocket.close();
-            }
-        } catch (IOException ignored) {}
-        closeDraegerClient();
-        setDraegerUiState(DeviceUiState.STOPPED, "Stopped");
+        draegerDevice.requestStop();
+        if (draegerNetworkDevice != null) {
+            draegerNetworkDevice.stop();
+            draegerNetworkDevice = null;
+        }
+        if (draegerSerialDevice != null) {
+            draegerSerialDevice.stop();
+            draegerSerialDevice = null;
+        }
+        closeDraegerNetworkResources();
+        setDraegerUiState(GuiDeviceController.State.STOPPED, "Stopped");
         draegerConnStatus.setText("No connection");
         drRealtimeEnabled = false;
         drRealtimeConfiguredCodes.clear();
@@ -3149,8 +3171,8 @@ public class CriticalInsightsMonitor extends JFrame {
             draegerServerSocket = new ServerSocket(port);
             draegerServerSocket.setSoTimeout(1000);
             log("[Draeger] Listening on port " + port);
-            setDraegerUiState(DeviceUiState.STARTING, "Listening on port " + port);
-            while (draegerRunning.get()) {
+            setDraegerUiState(GuiDeviceController.State.STARTING, "Listening on port " + port);
+            while (draegerDevice.isRunning()) {
                 try {
                     Socket client = draegerServerSocket.accept();
                     replaceDraegerClient(client);
@@ -3158,11 +3180,20 @@ public class CriticalInsightsMonitor extends JFrame {
                 }
             }
         } catch (IOException e) {
-            if (draegerRunning.get()) {
+            if (draegerDevice.isRunning()) {
                 log("[Draeger] Error: " + e.getMessage());
-                setDraegerUiState(DeviceUiState.FAULT, e.getMessage());
+                setDraegerUiState(GuiDeviceController.State.FAULT, e.getMessage());
             }
         }
+    }
+
+    private void closeDraegerNetworkResources() {
+        try {
+            if (draegerServerSocket != null && !draegerServerSocket.isClosed()) {
+                draegerServerSocket.close();
+            }
+        } catch (IOException ignored) {}
+        closeDraegerClient();
     }
 
     private void replaceDraegerClient(Socket client) {
@@ -3170,7 +3201,7 @@ public class CriticalInsightsMonitor extends JFrame {
         draegerClientSocket = client;
         SwingUtilities.invokeLater(() -> draegerConnStatus.setText("Connected: " + client.getRemoteSocketAddress()));
         log("[Draeger] Gateway connected from " + client.getRemoteSocketAddress());
-        setDraegerUiState(DeviceUiState.CONNECTED, "Connected: " + client.getRemoteSocketAddress());
+        setDraegerUiState(GuiDeviceController.State.CONNECTED, "Connected: " + client.getRemoteSocketAddress());
         drCommunicationInitialized = false;
         drRealtimeEnabled = false;
         drRealtimeConfiguredCodes.clear();
@@ -3182,10 +3213,10 @@ public class CriticalInsightsMonitor extends JFrame {
             if (draegerClientSocket == client) {
                 draegerClientSocket = null;
                 SwingUtilities.invokeLater(() -> draegerConnStatus.setText("Disconnected"));
-                if (draegerRunning.get()) {
-                    setDraegerUiState(DeviceUiState.RECONNECTING, "Disconnected; waiting for reconnect");
+                if (draegerDevice.isRunning()) {
+                    setDraegerUiState(GuiDeviceController.State.RECONNECTING, "Disconnected; waiting for reconnect");
                 } else {
-                    setDraegerUiState(DeviceUiState.STOPPED, "Stopped");
+                    setDraegerUiState(GuiDeviceController.State.STOPPED, "Stopped");
                 }
             }
         }, "draeger-sim-client");
@@ -3209,7 +3240,7 @@ public class CriticalInsightsMonitor extends JFrame {
             int pos = 0;
             boolean inFrame = false;
 
-            while (draegerRunning.get() && !client.isClosed()) {
+            while (draegerDevice.isRunning() && !client.isClosed()) {
                 int b = in.read();
                 if (b == -1) break;
                 if (b == DC1) {
@@ -3236,9 +3267,9 @@ public class CriticalInsightsMonitor extends JFrame {
                 }
             }
         } catch (IOException e) {
-            if (draegerRunning.get()) {
+            if (draegerDevice.isRunning()) {
                 log("[Draeger] Client error: " + e.getMessage());
-                setDraegerUiState(DeviceUiState.RECONNECTING, e.getMessage());
+                setDraegerUiState(GuiDeviceController.State.RECONNECTING, e.getMessage());
             }
         }
     }
@@ -3363,7 +3394,8 @@ public class CriticalInsightsMonitor extends JFrame {
     }
 
     private void sendDraegerDeviceId(OutputStream out) throws IOException {
-        String model = (String) modelCombo.getSelectedItem();
+        DraegerVitalsModel vitals = draegerVitalsSnapshot();
+        String model = vitals.model;
         String[][] models = {
             {"evita","8210","Evita","01.00:03.00"}, {"evita2","8200","Evita 2","01.00:03.00"},
             {"evita4","8214","Evita 4","02.00:03.00"}, {"v500","8410","Evita V500","03.20:06.00"},
@@ -3392,30 +3424,22 @@ public class CriticalInsightsMonitor extends JFrame {
 
     private void sendDraegerDataCP1(OutputStream out) throws IOException {
         ByteArrayOutputStream d = new ByteArrayOutputStream();
-        int tv = slTidalVol.getValue();
-        int rr = slRespRate.getValue();
-        int pp = slPeakPres.getValue();
-        int peep = slPeep.getValue();
-        int fio2 = slFio2.getValue();
-        int comp = slCompliance.getValue();
-        int res = slResistance.getValue();
-        int at = slAirwayTemp.getValue();
-        double mvol = tv * rr / 1000.0;
+        DraegerVitalsModel vitals = draegerVitalsSnapshot();
 
-        drMaybeAddRecord(d, 0x07, comp);
-        drMaybeAddRecord(d, 0x08, res);
-        drMaybeAddRecord(d, 0x73, (int)(pp * 0.55));
-        drMaybeAddRecord(d, 0x78, peep);
-        drMaybeAddRecord(d, 0x7D, pp);
-        drMaybeAddRecord(d, 0x82, tv);
-        drMaybeAddRecord(d, 0xB5, rr);
-        drMaybeAddRecord(d, 0xB9, (int)(mvol * 10));
-        drMaybeAddRecord(d, 0xC1, at);
-        drMaybeAddRecord(d, 0xF0, fio2);
+        drMaybeAddRecord(d, 0x07, vitals.compliance);
+        drMaybeAddRecord(d, 0x08, vitals.resistance);
+        drMaybeAddRecord(d, 0x73, (int)(vitals.peakPressure * 0.55));
+        drMaybeAddRecord(d, 0x78, vitals.peep);
+        drMaybeAddRecord(d, 0x7D, vitals.peakPressure);
+        drMaybeAddRecord(d, 0x82, vitals.tidalVolume);
+        drMaybeAddRecord(d, 0xB5, vitals.respRate);
+        drMaybeAddRecord(d, 0xB9, (int)(vitals.minuteVolume() * 10));
+        drMaybeAddRecord(d, 0xC1, vitals.airwayTemp);
+        drMaybeAddRecord(d, 0xF0, vitals.fio2);
 
         sendDraegerDataResponse(CMD_REQ_DATA_CP1, d.toByteArray(), out);
-        log("[Draeger] -> CP1: VT=" + tv + " RR=" + rr + " Paw=" + pp +
-            " PEEP=" + peep + " FiO2=" + fio2);
+        log("[Draeger] -> CP1: VT=" + vitals.tidalVolume + " RR=" + vitals.respRate +
+            " Paw=" + vitals.peakPressure + " PEEP=" + vitals.peep + " FiO2=" + vitals.fio2);
     }
 
     private void drMaybeAddRecord(ByteArrayOutputStream d, int code, int value) throws IOException {
@@ -3426,16 +3450,13 @@ public class CriticalInsightsMonitor extends JFrame {
 
     private void sendDraegerDataCP2(OutputStream out) throws IOException {
         ByteArrayOutputStream d = new ByteArrayOutputStream();
-        drMaybeAddRecord(d, 0xD6, slRespRate.getValue());
+        drMaybeAddRecord(d, 0xD6, draegerVitalsSnapshot().respRate);
         sendDraegerDataResponse(CMD_REQ_DATA_CP2, d.toByteArray(), out);
     }
 
     private void sendDraegerAlarms(int cmd, OutputStream out) throws IOException {
         ByteArrayOutputStream d = new ByteArrayOutputStream();
-        int pp = slPeakPres.getValue();
-        double mv = slTidalVol.getValue() * slRespRate.getValue() / 1000.0;
-        int rr = slRespRate.getValue();
-        int fio2 = slFio2.getValue();
+        DraegerVitalsModel vitals = draegerVitalsSnapshot();
 
         if (cmd == CMD_REQ_ALARMS_CP1 || cmd == CMD_REQ_ALARMS_CP3) {
             if (chkPawHigh.isSelected())   addAlarmRecord(d, 27, 0x10, "PAW HIGH    ");
@@ -3443,13 +3464,13 @@ public class CriticalInsightsMonitor extends JFrame {
             if (chkMinVolLow.isSelected()) addAlarmRecord(d, 26, 0x19, "MIN VOL LOW ");
             if (chkApnea.isSelected())     addAlarmRecord(d, 27, 0x98, "APNEA EVITA ");
 
-            if (pp > 35 && !chkPawHigh.isSelected())
+            if (vitals.peakPressure > 35 && !chkPawHigh.isSelected())
                 addAlarmRecord(d, 2, 0x10, "PAW HIGH    ");
-            if (mv < 3.0 && !chkMinVolLow.isSelected())
+            if (vitals.minuteVolume() < 3.0 && !chkMinVolLow.isSelected())
                 addAlarmRecord(d, 1, 0x0C, "MIN VOL LOW ");
-            if (rr < 4 && !chkApnea.isSelected())
+            if (vitals.respRate < 4 && !chkApnea.isSelected())
                 addAlarmRecord(d, 1, 0x1A, "APNEA       ");
-            if (fio2 > 60 && !chkO2High.isSelected())
+            if (vitals.fio2 > 60 && !chkO2High.isSelected())
                 addAlarmRecord(d, 3, 0x37, "% O2 HIGH   ");
         }
         sendDraegerDataResponse(cmd, d.toByteArray(), out);
@@ -3470,22 +3491,20 @@ public class CriticalInsightsMonitor extends JFrame {
     }
 
     private void sendDraegerSettings(OutputStream out) throws IOException {
-        int fio2 = slFio2.getValue();
-        int tv = slTidalVol.getValue();
-        int peep = slPeep.getValue();
+        DraegerVitalsModel vitals = draegerVitalsSnapshot();
 
         ByteArrayOutputStream d = new ByteArrayOutputStream();
-        addDrSettingRecord(d, 0x01, fio2, 0);
+        addDrSettingRecord(d, 0x01, vitals.fio2, 0);
         addDrSettingRecord(d, 0x02, 400, 1);
-        addDrSettingRecord(d, 0x04, tv, 3);
+        addDrSettingRecord(d, 0x04, vitals.tidalVolume, 3);
         addDrSettingRecord(d, 0x07, 10, 1);
         addDrSettingRecord(d, 0x08, 20, 1);
         addDrSettingRecord(d, 0x09, 120, 1);
-        addDrSettingRecord(d, 0x0B, peep * 10, 1);
+        addDrSettingRecord(d, 0x0B, vitals.peep * 10, 1);
         addDrSettingRecord(d, 0x13, 400, 1);
 
         sendDraegerDataResponse(CMD_REQ_SETTINGS, d.toByteArray(), out);
-        log("[Draeger] -> Settings: O2=" + fio2 + "% VT=" + tv + "mL PEEP=" + peep + " Pmax=40");
+        log("[Draeger] -> Settings: O2=" + vitals.fio2 + "% VT=" + vitals.tidalVolume + "mL PEEP=" + vitals.peep + " Pmax=40");
     }
 
     private void addDrSettingRecord(ByteArrayOutputStream d, int code, int value, int decimals) throws IOException {
@@ -3511,7 +3530,7 @@ public class CriticalInsightsMonitor extends JFrame {
 
     private void sendDraegerTextMessages(OutputStream out) throws IOException {
         ByteArrayOutputStream d = new ByteArrayOutputStream();
-        String mode = (String) ventModeCombo.getSelectedItem();
+        String mode = draegerVitalsSnapshot().ventMode;
         String text = "Mode " + mode;
         d.write(asciiHexHi(0x06));
         d.write(asciiHexLo(0x06));
@@ -3642,20 +3661,21 @@ public class CriticalInsightsMonitor extends JFrame {
     }
 
     private String formatDraegerTrendValue(int code) {
+        DraegerVitalsModel vitals = draegerVitalsSnapshot();
         switch (code) {
             case DR_TREND_VT:
-                return String.format("%4d", Integer.valueOf(slTidalVol.getValue()));
+                return String.format("%4d", Integer.valueOf(vitals.tidalVolume));
             case DR_TREND_PAW:
-                return String.format("%4d", Integer.valueOf(slPeakPres.getValue()));
+                return String.format("%4d", Integer.valueOf(vitals.peakPressure));
             case DR_TREND_PEEP:
-                return String.format("%4d", Integer.valueOf(slPeep.getValue()));
+                return String.format("%4d", Integer.valueOf(vitals.peep));
             case DR_TREND_FIO2:
-                return String.format("%4d", Integer.valueOf(slFio2.getValue()));
+                return String.format("%4d", Integer.valueOf(vitals.fio2));
             case DR_TREND_MV:
-                return String.format("%4.1f", Double.valueOf(slTidalVol.getValue() * slRespRate.getValue() / 1000.0));
+                return String.format("%4.1f", Double.valueOf(vitals.minuteVolume()));
             case DR_TREND_RR:
             default:
-                return String.format("%4d", Integer.valueOf(slRespRate.getValue()));
+                return String.format("%4d", Integer.valueOf(vitals.respRate));
         }
     }
 
@@ -3674,13 +3694,10 @@ public class CriticalInsightsMonitor extends JFrame {
 
     private void sendDraegerRealtimeBurst(OutputStream out) throws IOException {
         if (drTransmissionSuspended || !drRealtimeEnabled || drRealtimeConfiguredCodes.isEmpty()) return;
-        if (!chkDrWaveforms.isSelected()) return;
+        DraegerVitalsModel vitals = draegerVitalsSnapshot();
+        if (!vitals.waveformsEnabled) return;
 
-        int rr = slRespRate.getValue();
-        int pp = slPeakPres.getValue();
-        int peep = slPeep.getValue();
-        int tv = slTidalVol.getValue();
-        double breathPeriod = 60.0 / Math.max(rr, 1);
+        double breathPeriod = 60.0 / Math.max(vitals.respRate, 1);
         double ieI = 1.0, ieE = 2.0;
         double inspRatio = ieI / (ieI + ieE);
 
@@ -3705,7 +3722,7 @@ public class CriticalInsightsMonitor extends JFrame {
             }
 
             for (int code : drRealtimeConfiguredCodes) {
-                int sampleValue = generateDrWaveformSample(code, breathPhase, inspRatio, pp, peep, tv);
+                int sampleValue = generateDrWaveformSample(code, breathPhase, inspRatio, vitals.peakPressure, vitals.peep, vitals.tidalVolume);
                 int hiByte = 0x80 | ((sampleValue >> 6) & 0x3F);
                 int loByte = 0x80 | (sampleValue & 0x3F);
                 out.write(hiByte);
@@ -3799,7 +3816,7 @@ public class CriticalInsightsMonitor extends JFrame {
     // =====================================================================
 
     private void startPhilips() {
-        if (philipsRunning.get()) return;
+        if (philipsDevice.isRunning()) return;
         String transport = (String) philipsTransportCombo.getSelectedItem();
         if ("MIB-RS232".equals(transport)) {
             startPhilipsSerial();
@@ -3813,13 +3830,20 @@ public class CriticalInsightsMonitor extends JFrame {
             return;
         }
 
-        philipsRunning.set(true);
-        setPhilipsUiState(DeviceUiState.STARTING, "Listening on port " + port);
+        String statusMessage = "Listening on port " + port;
+        if (!philipsDevice.beginStarting(statusMessage)) return;
+        setPhilipsUiState(GuiDeviceController.State.STARTING, statusMessage);
         log("[Philips] Starting on UDP port " + port);
 
-        philipsThread = new Thread(() -> runPhilipsServer(port), "philips-sim-ci");
-        philipsThread.setDaemon(true);
-        philipsThread.start();
+        DeviceDescriptor descriptor = networkDescriptor("philips_gui_udp", "philips-intellivue", "Philips", "MX800", "udp", String.valueOf(port));
+        philipsNetworkDevice = new InProcessSimulatedDevice(descriptor, () -> runPhilipsServer(port), this::closePhilipsNetworkResources);
+        try {
+            philipsNetworkDevice.start();
+        } catch (Exception e) {
+            philipsDevice.requestStop();
+            setPhilipsUiState(GuiDeviceController.State.FAULT, "Start failed: " + e.getMessage());
+            JOptionPane.showMessageDialog(this, "Could not start Philips UDP simulator: " + e.getMessage());
+        }
     }
 
     private void startPhilipsSerial() {
@@ -3828,32 +3852,46 @@ public class CriticalInsightsMonitor extends JFrame {
             JOptionPane.showMessageDialog(this, "Enter a Philips serial device path");
             return;
         }
-        philipsRunning.set(true);
+        if (!philipsDevice.beginStarting("Starting serial process")) return;
         try {
             writeSerialControlFiles();
-            ProcessBuilder pb = new ProcessBuilder(
-                    javaCommand(), "-cp", simulatorClasspath(), "IntellivueSerialSimulator",
-                    "--serial", serialPath,
-                    "--control-file", philipsControlFile.getAbsolutePath());
-            pb.redirectErrorStream(true);
-            philipsSerialProcess = pb.start();
-            startProcessLogReader("Philips MIB-RS232", philipsSerialProcess);
-        } catch (IOException e) {
-            philipsRunning.set(false);
-            setPhilipsUiState(DeviceUiState.FAULT, "Start failed: " + e.getMessage());
+            DeviceDescriptor descriptor = serialDescriptor("philips_gui_mib", "philips-intellivue", "Philips", "MX800", "mib-rs232", serialPath);
+            philipsSerialDevice = LegacyJavaProcessDevice.philips(
+                    descriptor,
+                    serialSettings(philipsControlFile),
+                    new File("."),
+                    line -> log("[Philips MIB-RS232] " + line));
+            philipsSerialDevice.start();
+        } catch (Exception e) {
+            philipsDevice.requestStop();
+            setPhilipsUiState(GuiDeviceController.State.FAULT, "Start failed: " + e.getMessage());
             JOptionPane.showMessageDialog(this, "Could not start Philips MIB-RS232 simulator: " + e.getMessage());
             return;
         }
 
-        setPhilipsUiState(DeviceUiState.STARTING, "Serial process started");
+        setPhilipsUiState(GuiDeviceController.State.STARTING, "Serial process started");
         philipsConnStatus.setText("Serial: " + serialPath);
         log("[Philips] Starting MIB-RS232 simulator on " + serialPath);
     }
 
     private void stopPhilips() {
-        philipsRunning.set(false);
-        stopProcess(philipsSerialProcess);
-        philipsSerialProcess = null;
+        philipsDevice.requestStop();
+        if (philipsNetworkDevice != null) {
+            philipsNetworkDevice.stop();
+            philipsNetworkDevice = null;
+        }
+        if (philipsSerialDevice != null) {
+            philipsSerialDevice.stop();
+            philipsSerialDevice = null;
+        }
+        closePhilipsNetworkResources();
+        phAssociated = false;
+        setPhilipsUiState(GuiDeviceController.State.STOPPED, "Stopped");
+        philipsConnStatus.setText("No connection");
+        log("[Philips] Stopped");
+    }
+
+    private void closePhilipsNetworkResources() {
         if (broadcastExec != null) {
             broadcastExec.shutdownNow();
             broadcastExec = null;
@@ -3863,10 +3901,6 @@ public class CriticalInsightsMonitor extends JFrame {
                 philipsSocket.close();
             }
         } catch (Exception ignored) {}
-        phAssociated = false;
-        setPhilipsUiState(DeviceUiState.STOPPED, "Stopped");
-        philipsConnStatus.setText("No connection");
-        log("[Philips] Stopped");
     }
 
     private void runPhilipsServer(int port) {
@@ -3875,7 +3909,7 @@ public class CriticalInsightsMonitor extends JFrame {
             philipsSocket.setSoTimeout(500);
             philipsSocket.setBroadcast(true);
             log("[Philips] Listening on UDP port " + port);
-            setPhilipsUiState(DeviceUiState.STARTING, "Listening on port " + port);
+            setPhilipsUiState(GuiDeviceController.State.STARTING, "Listening on port " + port);
 
             broadcastExec = Executors.newSingleThreadScheduledExecutor(r -> {
                 Thread t = new Thread(r, "ph-broadcast-ci");
@@ -3883,7 +3917,7 @@ public class CriticalInsightsMonitor extends JFrame {
                 return t;
             });
             broadcastExec.scheduleAtFixedRate(() -> {
-                if (!phAssociated && philipsRunning.get() && chkBroadcast.isSelected()) {
+                if (!phAssociated && philipsDevice.isRunning() && chkBroadcast.isSelected()) {
                     try {
                         sendPhilipsConnectIndication(philipsSocket, port);
                         SwingUtilities.invokeLater(() -> philipsConnStatus.setText("Broadcasting..."));
@@ -3896,7 +3930,7 @@ public class CriticalInsightsMonitor extends JFrame {
             phPollNumber = 0;
             phSequenceNumber = 0;
 
-            while (philipsRunning.get()) {
+            while (philipsDevice.isRunning()) {
                 try {
                     DatagramPacket pkt = new DatagramPacket(recvBuf, recvBuf.length);
                     philipsSocket.receive(pkt);
@@ -3912,7 +3946,7 @@ public class CriticalInsightsMonitor extends JFrame {
                         log("[Philips] <- Association Request from " + client);
                         SwingUtilities.invokeLater(() ->
                             philipsConnStatus.setText("Connected: " + client));
-                        setPhilipsUiState(DeviceUiState.CONNECTED, "Connected: " + client);
+                        setPhilipsUiState(GuiDeviceController.State.CONNECTED, "Connected: " + client);
 
                         sendPhilipsAssocResponse(philipsSocket, client);
                         phAssociated = true;
@@ -3953,18 +3987,19 @@ public class CriticalInsightsMonitor extends JFrame {
 
                                 if (actionType == (NOM_ACT_POLL_MDIB_DATA_EXT & 0xFFFF)) {
                                     sendPhilipsExtendedPoll(philipsSocket, client, invokeId);
-                                } else if (requestedObjectClass == NOM_MOC_VMO_METRIC_SA_RT && chkPhWaveforms.isSelected()) {
+                            } else if (requestedObjectClass == NOM_MOC_VMO_METRIC_SA_RT && philipsVitalsSnapshot().waveformsEnabled) {
                                     sendPhilipsWaveformPollResult(philipsSocket, client, invokeId);
                                     log("[Philips]   -> Waveform poll result");
                                 } else {
                                     sendPhilipsPollResult(philipsSocket, client, invokeId);
                                 }
 
-                                log("[Philips] -> Poll Result: HR=" + slHeartRate.getValue() +
-                                    " SpO2=" + slSpo2.getValue() + " RR=" + slPhRespRate.getValue() +
-                                    " ABP=" + slAbpSys.getValue() + "/" + slAbpDia.getValue() +
-                                    " CVP=" + slCvp.getValue() +
-                                    " PAP=" + slPapSys.getValue() + "/" + slPapDia.getValue());
+                                PhilipsVitalsModel vitals = philipsVitalsSnapshot();
+                                log("[Philips] -> Poll Result: HR=" + vitals.heartRate +
+                                    " SpO2=" + vitals.spo2 + " RR=" + vitals.respRate +
+                                    " ABP=" + vitals.abpSys + "/" + vitals.abpDia +
+                                    " CVP=" + vitals.cvp +
+                                    " PAP=" + vitals.papSys + "/" + vitals.papDia);
                             } else if (cmdType == CMD_GET) {
                                 log("[Philips] <- Get Request");
                                 sendPhilipsGetResult(philipsSocket, client, invokeId);
@@ -3988,9 +4023,9 @@ public class CriticalInsightsMonitor extends JFrame {
                 }
             }
         } catch (IOException e) {
-            if (philipsRunning.get()) {
+            if (philipsDevice.isRunning()) {
                 log("[Philips] Error: " + e.getMessage());
-                setPhilipsUiState(DeviceUiState.FAULT, e.getMessage());
+                setPhilipsUiState(GuiDeviceController.State.FAULT, e.getMessage());
             }
         }
     }
@@ -4251,7 +4286,7 @@ public class CriticalInsightsMonitor extends JFrame {
         sendUdp(socket, addr, numSeg);
         log("[Philips]   -> ROLRS: Numerics segment");
 
-        if (chkPhWaveforms.isSelected()) {
+        if (philipsVitalsSnapshot().waveformsEnabled) {
             ByteBuffer waveSeg = buildPhWaveformSegment(invokeId);
             sendUdp(socket, addr, waveSeg);
             log("[Philips]   -> ROLRS: Waveform segment");
@@ -4627,39 +4662,25 @@ public class CriticalInsightsMonitor extends JFrame {
     }
 
     private int[][] getPhNumerics() {
-        int hr = slHeartRate.getValue();
-        int spo2 = slSpo2.getValue();
-        int rr = slPhRespRate.getValue();
-        int abpS = slAbpSys.getValue();
-        int abpD = slAbpDia.getValue();
-        int abpM = abpS > 0 ? (abpS + 2 * abpD) / 3 : 0;
-        int nbpS = slNbpSys.getValue();
-        int nbpD = slNbpDia.getValue();
-        int nbpM = nbpS > 0 ? (nbpS + 2 * nbpD) / 3 : 0;
-        int etco2 = slEtCo2.getValue();
-        int temp = slTemp.getValue();
-        int cvp = slCvp.getValue();
-        int papS = slPapSys.getValue();
-        int papD = slPapDia.getValue();
-        int papM = (papS + 2 * papD) / 3;
+        PhilipsVitalsModel vitals = philipsVitalsSnapshot();
 
         return new int[][] {
-            {NOM_ECG_CARD_BEAT_RATE,     hr,    NOM_DIM_BEAT_PER_MIN, 0x01, 0},
-            {NOM_PULS_OXIM_SAT_O2,       spo2,  NOM_DIM_PERCENT,      0x02, 0},
-            {NOM_PULS_OXIM_PULS_RATE,    hr > 0 ? hr+1 : 0,  NOM_DIM_BEAT_PER_MIN, 0x03, 0},
-            {NOM_RESP_RATE,              rr,    NOM_DIM_RESP_PER_MIN, 0x04, 0},
-            {NOM_PRESS_BLD_ART_ABP_SYS,  abpS,  NOM_DIM_MMHG,         0x10, 0},
-            {NOM_PRESS_BLD_ART_ABP_DIA,  abpD,  NOM_DIM_MMHG,         0x11, 0},
-            {NOM_PRESS_BLD_ART_ABP_MEAN, abpM,  NOM_DIM_MMHG,         0x12, 0},
-            {NOM_PRESS_BLD_NONINV_SYS,   nbpS,  NOM_DIM_MMHG,         0x20, 0},
-            {NOM_PRESS_BLD_NONINV_DIA,   nbpD,  NOM_DIM_MMHG,         0x21, 0},
-            {NOM_PRESS_BLD_NONINV_MEAN,  nbpM,  NOM_DIM_MMHG,         0x22, 0},
-            {NOM_CO2_ET,                 etco2, NOM_DIM_MMHG,         0x30, 0},
-            {NOM_TEMP_BLD,               temp,  NOM_DIM_DEGC,         0x40, 1},
-            {NOM_PRESS_BLD_VEN_CENT,     cvp,   NOM_DIM_MMHG,         0x41, 0},
-            {NOM_PRESS_BLD_ART_PULM_SYS, papS,  NOM_DIM_MMHG,         0x42, 0},
-            {NOM_PRESS_BLD_ART_PULM_DIA, papD,  NOM_DIM_MMHG,         0x43, 0},
-            {NOM_PRESS_BLD_ART_PULM_MEAN,papM,  NOM_DIM_MMHG,         0x44, 0},
+            {NOM_ECG_CARD_BEAT_RATE,     vitals.heartRate, NOM_DIM_BEAT_PER_MIN, 0x01, 0},
+            {NOM_PULS_OXIM_SAT_O2,       vitals.spo2,      NOM_DIM_PERCENT,      0x02, 0},
+            {NOM_PULS_OXIM_PULS_RATE,    vitals.heartRate > 0 ? vitals.heartRate + 1 : 0, NOM_DIM_BEAT_PER_MIN, 0x03, 0},
+            {NOM_RESP_RATE,              vitals.respRate,  NOM_DIM_RESP_PER_MIN, 0x04, 0},
+            {NOM_PRESS_BLD_ART_ABP_SYS,  vitals.abpSys,    NOM_DIM_MMHG,         0x10, 0},
+            {NOM_PRESS_BLD_ART_ABP_DIA,  vitals.abpDia,    NOM_DIM_MMHG,         0x11, 0},
+            {NOM_PRESS_BLD_ART_ABP_MEAN, vitals.abpMean(), NOM_DIM_MMHG,         0x12, 0},
+            {NOM_PRESS_BLD_NONINV_SYS,   vitals.nbpSys,    NOM_DIM_MMHG,         0x20, 0},
+            {NOM_PRESS_BLD_NONINV_DIA,   vitals.nbpDia,    NOM_DIM_MMHG,         0x21, 0},
+            {NOM_PRESS_BLD_NONINV_MEAN,  vitals.nbpMean(), NOM_DIM_MMHG,         0x22, 0},
+            {NOM_CO2_ET,                 vitals.etCo2,     NOM_DIM_MMHG,         0x30, 0},
+            {NOM_TEMP_BLD,               vitals.tempTenthsC, NOM_DIM_DEGC,       0x40, 1},
+            {NOM_PRESS_BLD_VEN_CENT,     vitals.cvp,       NOM_DIM_MMHG,         0x41, 0},
+            {NOM_PRESS_BLD_ART_PULM_SYS, vitals.papSys,    NOM_DIM_MMHG,         0x42, 0},
+            {NOM_PRESS_BLD_ART_PULM_DIA, vitals.papDia,    NOM_DIM_MMHG,         0x43, 0},
+            {NOM_PRESS_BLD_ART_PULM_MEAN,vitals.papMean(), NOM_DIM_MMHG,         0x44, 0},
         };
     }
 
@@ -4722,14 +4743,12 @@ public class CriticalInsightsMonitor extends JFrame {
     private void writePhAlarmMonitorObs(ByteBuffer buf, int handle) {
         buf.putShort((short) handle);
 
-        int hr = slHeartRate.getValue();
-        int spo2 = slSpo2.getValue();
-        int abpSys = slAbpSys.getValue();
+        PhilipsVitalsModel vitals = philipsVitalsSnapshot();
 
-        boolean hrHigh = hr > 120 || chkPhHrAlarm.isSelected();
-        boolean hrLow  = hr < 50;
-        boolean spo2Lo = spo2 < 90 || chkPhSpo2Low.isSelected();
-        boolean abpHi  = abpSys > 160 || chkPhAbpHigh.isSelected();
+        boolean hrHigh = vitals.heartRate > 120 || chkPhHrAlarm.isSelected();
+        boolean hrLow  = vitals.heartRate < 50;
+        boolean spo2Lo = vitals.spo2 < 90 || chkPhSpo2Low.isSelected();
+        boolean abpHi  = vitals.abpSys > 160 || chkPhAbpHigh.isSelected();
 
         int physAlarmCount = 0;
         if (hrHigh) physAlarmCount++;
@@ -4790,16 +4809,16 @@ public class CriticalInsightsMonitor extends JFrame {
     private void writePhPatientDemogObs(ByteBuffer buf, int handle) {
         buf.putShort((short) handle);
 
-        String fullName = tfPatientName.getText().trim();
+        PatientDemographics patient = philipsVitalsSnapshot().patient;
+        String fullName = patient.fullName;
         String[] parts = fullName.split("\\s+", 2);
         String givenName = parts[0];
         String familyName = parts.length > 1 ? parts[1] : "";
-        String patId = tfPatientId.getText().trim();
+        String patId = patient.patientId;
 
         int dobYear = 1980, dobMonth = 1, dobDay = 15;
         try {
-            String dob = tfPatientDob.getText().trim();
-            String[] dp = dob.split("-");
+            String[] dp = patient.dob.split("-");
             if (dp.length == 3) {
                 dobYear = Integer.parseInt(dp[0]);
                 dobMonth = Integer.parseInt(dp[1]);
@@ -4808,14 +4827,14 @@ public class CriticalInsightsMonitor extends JFrame {
         } catch (Exception ignored) {}
 
         int sex = SEX_UNKNOWN;
-        String sexStr = (String) cbPatientSex.getSelectedItem();
+        String sexStr = patient.sex;
         if ("M".equals(sexStr)) sex = SEX_MALE;
         else if ("F".equals(sexStr)) sex = SEX_FEMALE;
 
         double height = 175;
         double weight = 75;
-        try { height = Double.parseDouble(tfPatientHeight.getText().trim()); } catch (Exception ignored) {}
-        try { weight = Double.parseDouble(tfPatientWeight.getText().trim()); } catch (Exception ignored) {}
+        try { height = Double.parseDouble(patient.heightCm); } catch (Exception ignored) {}
+        try { weight = Double.parseDouble(patient.weightKg); } catch (Exception ignored) {}
         double bsa = 0.007184 * Math.pow(height, 0.725) * Math.pow(weight, 0.425);
 
         buf.putShort((short) 8);
@@ -4878,16 +4897,16 @@ public class CriticalInsightsMonitor extends JFrame {
     private short[] generatePhEcgSamples() {
         int numSamples = 500;
         short[] samples = new short[numSamples];
-        int hr = slHeartRate.getValue();
-        double beatInterval = 60.0 / Math.max(hr, 1);
+        PhilipsVitalsModel vitals = philipsVitalsSnapshot();
+        double beatInterval = 60.0 / Math.max(vitals.heartRate, 1);
         double samplePeriod = 1.0 / 500.0;
-        String rhythm = (String) ecgRhythmCombo.getSelectedItem();
+        String rhythm = vitals.rhythm;
 
         for (int i = 0; i < numSamples; i++) {
             double t = phEcgPhase + i * samplePeriod;
             double val = 0;
 
-            if (hr == 0 || "Asystole".equals(rhythm)) {
+            if (vitals.heartRate == 0 || "Asystole".equals(rhythm)) {
                 val = phRng.nextGaussian() * 0.005;
             } else if ("Ventricular Fibrillation".equals(rhythm)) {
                 val = 0.3 * Math.sin(t * 25 + phRng.nextDouble() * 3)
@@ -4924,14 +4943,14 @@ public class CriticalInsightsMonitor extends JFrame {
     private short[] generatePhPlethSamples() {
         int numSamples = 125;
         short[] samples = new short[numSamples];
-        int hr = slHeartRate.getValue();
-        double beatInterval = 60.0 / Math.max(hr, 1);
+        PhilipsVitalsModel vitals = philipsVitalsSnapshot();
+        double beatInterval = 60.0 / Math.max(vitals.heartRate, 1);
         double samplePeriod = 1.0 / 125.0;
 
         for (int i = 0; i < numSamples; i++) {
             double t = phPlethPhase + i * samplePeriod;
             double val;
-            if (hr == 0) {
+            if (vitals.heartRate == 0) {
                 val = phRng.nextGaussian() * 0.005;
             } else {
                 double beatFrac = (t % beatInterval) / beatInterval;
@@ -4950,17 +4969,17 @@ public class CriticalInsightsMonitor extends JFrame {
     private short[] generatePhAbpSamples() {
         int numSamples = 125;
         short[] samples = new short[numSamples];
-        int hr = slHeartRate.getValue();
-        double beatInterval = 60.0 / Math.max(hr, 1);
+        PhilipsVitalsModel vitals = philipsVitalsSnapshot();
+        double beatInterval = 60.0 / Math.max(vitals.heartRate, 1);
         double samplePeriod = 1.0 / 125.0;
-        double abpS = slAbpSys.getValue();
-        double abpD = slAbpDia.getValue();
+        double abpS = vitals.abpSys;
+        double abpD = vitals.abpDia;
         double abpM = (abpS + 2 * abpD) / 3.0;
 
         for (int i = 0; i < numSamples; i++) {
             double t = phAbpWavePhase + i * samplePeriod;
             double val;
-            if (hr == 0 || abpS == 0) {
+            if (vitals.heartRate == 0 || abpS == 0) {
                 val = phRng.nextGaussian() * 0.5;
             } else {
                 double beatFrac = (t % beatInterval) / beatInterval;
@@ -4986,14 +5005,14 @@ public class CriticalInsightsMonitor extends JFrame {
     private short[] generatePhRespSamples() {
         int numSamples = 62;
         short[] samples = new short[numSamples];
-        int rr = slPhRespRate.getValue();
-        double breathInterval = 60.0 / Math.max(rr, 1);
+        PhilipsVitalsModel vitals = philipsVitalsSnapshot();
+        double breathInterval = 60.0 / Math.max(vitals.respRate, 1);
         double samplePeriod = 1.0 / 62.0;
 
         for (int i = 0; i < numSamples; i++) {
             double t = phRespWavePhase + i * samplePeriod;
             double val;
-            if (rr == 0) {
+            if (vitals.respRate == 0) {
                 val = phRng.nextGaussian() * 0.005;
             } else {
                 double phase = (t % breathInterval) / breathInterval;
@@ -5199,7 +5218,12 @@ public class CriticalInsightsMonitor extends JFrame {
     // =====================================================================
 
     public static void main(String[] args) {
-        final boolean autoStart = args != null && Arrays.asList(args).contains("--autostart");
+        java.util.List<String> argList = args == null ? Collections.emptyList() : Arrays.asList(args);
+        if (argList.contains("--smoke")) {
+            runSmokeCheck();
+            return;
+        }
+        final boolean autoStart = argList.contains("--autostart");
         try {
             UIManager.setLookAndFeel(UIManager.getCrossPlatformLookAndFeelClassName());
         } catch (Exception ignored) {}
@@ -5212,5 +5236,32 @@ public class CriticalInsightsMonitor extends JFrame {
                 monitor.startPhilips();
             }
         });
+    }
+
+    private static void runSmokeCheck() {
+        if (GraphicsEnvironment.isHeadless()) {
+            new GuiDeviceController("smoke").beginStarting("ok");
+            new DraegerVitalsModel(450, 16, 22, 5, 40, 45, 12, 34, "v500", "SIMV", true, false);
+            new PhilipsVitalsModel(72, 97, 16, 120, 80, 118, 76, 38, 370, 8, 25, 10,
+                    "Normal Sinus", true, false,
+                    new PatientDemographics("John Doe", "P12345", "1980-01-15", "M", "175", "75"));
+            System.out.println("CriticalInsightsMonitor smoke check passed (headless)");
+            return;
+        }
+        try {
+            UIManager.setLookAndFeel(UIManager.getCrossPlatformLookAndFeelClassName());
+        } catch (Exception ignored) {}
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                CriticalInsightsMonitor monitor = new CriticalInsightsMonitor();
+                monitor.updateDrNumerics();
+                monitor.updatePhNumerics();
+                monitor.refreshMonitorViews();
+                monitor.dispose();
+            });
+            System.out.println("CriticalInsightsMonitor smoke check passed");
+        } catch (Exception e) {
+            throw new RuntimeException("CriticalInsightsMonitor smoke check failed", e);
+        }
     }
 }

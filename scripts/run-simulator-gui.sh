@@ -15,4 +15,4 @@ if [ ! -f "$ROOT_DIR/simulator/build/install/simulator/lib/simulator.jar" ]; the
 fi
 
 cd "$ROOT_DIR"
-exec java -cp "simulator/build/install/simulator/lib/*" CriticalInsightsMonitor "$@"
+exec java -cp "simulator/build/install/simulator/lib/*" org.mdpnp.simulator.launcher.CriticalInsightsMonitorLauncher "$@"

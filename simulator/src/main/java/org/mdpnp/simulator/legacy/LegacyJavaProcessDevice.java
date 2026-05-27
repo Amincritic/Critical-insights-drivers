@@ -8,6 +8,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 import org.mdpnp.simulator.core.DeviceDescriptor;
 import org.mdpnp.simulator.core.DeviceStatus;
@@ -19,16 +20,22 @@ public final class LegacyJavaProcessDevice implements SimulatedDevice {
     private final List<String> args;
     private final File workingDirectory;
     private final String classpath;
+    private final Consumer<String> logSink;
     private final AtomicReference<DeviceStatus> status = new AtomicReference<DeviceStatus>(DeviceStatus.STOPPED);
     private volatile Process process;
     private volatile String lastMessage = "";
 
     public LegacyJavaProcessDevice(DeviceDescriptor descriptor, String mainClass, List<String> args, File workingDirectory) {
+        this(descriptor, mainClass, args, workingDirectory, null);
+    }
+
+    public LegacyJavaProcessDevice(DeviceDescriptor descriptor, String mainClass, List<String> args, File workingDirectory, Consumer<String> logSink) {
         this.descriptor = descriptor;
         this.mainClass = mainClass;
         this.args = Collections.unmodifiableList(new ArrayList<String>(args));
         this.workingDirectory = workingDirectory;
         this.classpath = System.getProperty("java.class.path", ".");
+        this.logSink = logSink;
     }
 
     @Override
@@ -108,7 +115,12 @@ public final class LegacyJavaProcessDevice implements SimulatedDevice {
                     String line;
                     while ((line = reader.readLine()) != null) {
                         lastMessage = line;
-                        System.err.println("simulator[" + descriptor.id() + "] " + line);
+                        String message = "simulator[" + descriptor.id() + "] " + line;
+                        if (logSink != null) {
+                            logSink.accept(line);
+                        } else {
+                            System.err.println(message);
+                        }
                     }
                 } catch (Exception e) {
                     lastMessage = e.getMessage();
@@ -128,6 +140,10 @@ public final class LegacyJavaProcessDevice implements SimulatedDevice {
     }
 
     public static LegacyJavaProcessDevice draeger(DeviceDescriptor descriptor, Map<String, String> settings, File workingDirectory) {
+        return draeger(descriptor, settings, workingDirectory, null);
+    }
+
+    public static LegacyJavaProcessDevice draeger(DeviceDescriptor descriptor, Map<String, String> settings, File workingDirectory, Consumer<String> logSink) {
         String transportType = setting(settings, descriptor.transport(), "type", "tcp");
         String model = setting(settings, descriptor.transport(), "model", "evita");
         List<String> args = new ArrayList<String>();
@@ -142,17 +158,21 @@ public final class LegacyJavaProcessDevice implements SimulatedDevice {
         }
         args.add("--model");
         args.add(model);
-        return new LegacyJavaProcessDevice(descriptor, "MedibusSimulatorV2", args, workingDirectory);
+        return new LegacyJavaProcessDevice(descriptor, "org.mdpnp.simulator.launcher.MedibusSimulatorV2Launcher", args, workingDirectory, logSink);
     }
 
     public static LegacyJavaProcessDevice philips(DeviceDescriptor descriptor, Map<String, String> settings, File workingDirectory) {
+        return philips(descriptor, settings, workingDirectory, null);
+    }
+
+    public static LegacyJavaProcessDevice philips(DeviceDescriptor descriptor, Map<String, String> settings, File workingDirectory, Consumer<String> logSink) {
         String transportType = setting(settings, descriptor.transport(), "type", "udp");
         List<String> args = new ArrayList<String>();
         if ("serial".equalsIgnoreCase(transportType) || "rs232".equalsIgnoreCase(transportType) || "mib-rs232".equalsIgnoreCase(transportType)) {
             args.add("--serial");
             args.add(requiredSetting(settings, descriptor.transport(), "port", descriptor.id()));
             addOptionalArg(args, settings, "control-file", "--control-file");
-            return new LegacyJavaProcessDevice(descriptor, "IntellivueSerialSimulator", args, workingDirectory);
+            return new LegacyJavaProcessDevice(descriptor, "org.mdpnp.simulator.launcher.IntellivueSerialSimulatorLauncher", args, workingDirectory, logSink);
         } else {
             String port = setting(settings, descriptor.transport(), "port", "24105");
             args.add("--port");
@@ -160,7 +180,7 @@ public final class LegacyJavaProcessDevice implements SimulatedDevice {
             addOptionalArg(args, settings, "patient", "--patient");
             addOptionalArg(args, settings, "patient-id", "--patient-id");
             addOptionalArg(args, settings, "waves", "--waves");
-            return new LegacyJavaProcessDevice(descriptor, "IntellivueSimulatorV2", args, workingDirectory);
+            return new LegacyJavaProcessDevice(descriptor, "org.mdpnp.simulator.launcher.IntellivueSimulatorV2Launcher", args, workingDirectory, logSink);
         }
     }
 
