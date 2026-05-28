@@ -989,18 +989,19 @@ public class CriticalInsightsMonitor extends JFrame {
         leftRail.add(controlDeviceTabs, BorderLayout.CENTER);
 
         JPanel logPanel = buildConsoleLogPanel();
-        logPanel.setPreferredSize(new Dimension(360, 0));
+        logPanel.setMinimumSize(new Dimension(0, 140));
+        logPanel.setPreferredSize(new Dimension(0, 240));
 
-        JSplitPane centerRight = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, liveDeviceTabs, logPanel);
-        centerRight.setResizeWeight(0.74);
-        centerRight.setDividerLocation(760);
-        centerRight.setDividerSize(6);
-        centerRight.setContinuousLayout(true);
-        centerRight.setBorder(BorderFactory.createEmptyBorder());
-        centerRight.setBackground(DARK_BG);
-        centerRight.setMinimumSize(new Dimension(640, 0));
+        JSplitPane liveAndLog = new JSplitPane(JSplitPane.VERTICAL_SPLIT, liveDeviceTabs, logPanel);
+        liveAndLog.setResizeWeight(0.76);
+        liveAndLog.setDividerLocation(620);
+        liveAndLog.setDividerSize(6);
+        liveAndLog.setContinuousLayout(true);
+        liveAndLog.setBorder(BorderFactory.createEmptyBorder());
+        liveAndLog.setBackground(DARK_BG);
+        liveAndLog.setMinimumSize(new Dimension(640, 0));
 
-        JSplitPane fullWorkspace = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftScroll, centerRight);
+        JSplitPane fullWorkspace = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, leftScroll, liveAndLog);
         fullWorkspace.setResizeWeight(0.30);
         fullWorkspace.setDividerLocation(500);
         fullWorkspace.setDividerSize(6);
