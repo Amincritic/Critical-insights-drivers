@@ -26,7 +26,7 @@ Use this table before reading the rest of the docs:
 | Run protocol simulators without the GUI | This README, `Quick Start: Headless Protocol Simulators` | Exercises the real drivers. |
 | Test the web/API with deterministic JSON only | This README, `Quick Start: Canonical Replay` | Does not test protocol decoding. |
 | Test RS232 locally without hardware | This README, `Quick Start: RS232 Simulation Without Hardware` | Requires `socat`. |
-| Deploy only drivers on an edge device | `docs/edge-driver-deployment.md` | No simulator and no web dashboard required. |
+| Deploy only drivers on an edge device | `DRIVER_ONLY.md` | No simulator and no web dashboard required. |
 | Deploy only the Philips driver | `gateway/devices/philips-intellivue/EDGE.md` | Device-specific commands and output examples. |
 | Deploy only the Draeger driver | `gateway/devices/draeger-medibus/EDGE.md` | Device-specific commands, profiles, and output examples. |
 | Build your own dashboard/backend | `docs/dashboard-integration.md` | Consume canonical events through SSE, JSONL, or HTTP POST. |
